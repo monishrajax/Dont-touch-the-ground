@@ -1338,6 +1338,7 @@
     ui.overDetail.textContent = run.heightM + ' m climbed · ' + formatTime(run.time) + ' survived · stage ' + run.stage;
     ui.menuBest.textContent = best;
     if (isRecord && final > 0 && run.prevBest > 0) Sound.record();
+    ui.toast.classList.remove('show');
     gameOverAt = performance.now();
     setState('gameover');
   }
