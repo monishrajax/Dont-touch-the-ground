@@ -2,7 +2,7 @@
 
 *One jump away from game over.*
 
-A neon arcade platformer for the browser. Climb floating platforms, dodge saws, orbs and spikes, and stay above the rising lava floor for as long as you can.
+A prison-break arcade platformer for the browser. You are an escaped prisoner (striped jumpsuit, ball and chain included) climbing out of the prison: hop between steel beams, dodge sawblades, shock orbs and barbed wire, and stay above the rising **laser alarm floor** for as long as you can.
 
 It's built with plain HTML5 Canvas, CSS and JavaScript. There are no dependencies and no build step. Single player needs no internet connection. **Multiplayer** lets friends race up the same tower by sharing a 5-character game code (needs internet).
 
@@ -22,7 +22,7 @@ npx serve .
 ```
 Dont touch the ground/
 ├── index.html   # page structure: canvas, HUD, menu / pause / game-over overlays, touch buttons
-├── style.css    # neon UI styling, overlay transitions, responsive + touch layout
+├── style.css    # prison-theme UI styling, overlay transitions, responsive + touch layout
 ├── game.js      # all game logic and Canvas rendering (incl. multiplayer lobby & match logic)
 ├── net.js       # multiplayer networking (WebRTC via PeerJS, loaded on demand)
 └── README.md
@@ -38,7 +38,7 @@ Dont touch the ground/
 
 Rules and notes:
 
-- Each player has their own lava and their own vanishing/crumbling platforms, so nobody can break a platform under someone else.
+- Each player has their own alarm floor and their own vanishing/crumbling platforms, so nobody can break a platform under someone else.
 - A match can't be paused. `P` / `Esc` opens a "Leave match?" panel while the game keeps running.
 - If a player leaves, they're marked "left" in the results. If the host leaves, everyone goes back to the multiplayer screen.
 - **Everyone needs the game files.** The easiest way is to put the game online, for example on GitHub Pages (Settings → Pages → deploy from `main`). When the game is served over `https`, **COPY CODE** copies a ready-made invite link (`...?join=CODE`).
@@ -61,7 +61,7 @@ The left and right screen edges wrap around: walk off one side and you come back
 ## Gameplay
 
 - **Score** = metres climbed (1 m = 10 px of height) **+5** for the first landing on each platform. Standing still or re-landing on the same platform earns nothing.
-- **The floor** is lava. Touching it ends the run immediately. It starts rising after 4 seconds and speeds up a little each stage, so you can't camp. It also stays at the bottom of the screen, so falling off the view means death.
+- **The floor** is a laser alarm grid. Touching it ends the run immediately ("Busted!"). It starts rising after 4 seconds and speeds up a little each stage, so you can't camp. It also stays at the bottom of the screen, so falling off the view means death.
 - **Stages** (based on height):
 
 | Stage | Height | New in this stage |
@@ -71,7 +71,7 @@ The left and right screen edges wrap around: walk off one side and you come back
 | 3 | 280 m | Moving saws and stationary spikes |
 | 4 | 480 m | Vanishing platforms |
 | 5 | 720 m | Crumbling platforms and electric orbs |
-| 6+ | every +350 m | Bigger gaps, narrower platforms, faster hazards, faster lava |
+| 6+ | every +350 m | Bigger gaps, narrower platforms, faster hazards, faster-rising alarm floor |
 
 | Platform | Look | Behaviour |
 |---|---|---|
@@ -89,10 +89,10 @@ The file is split into numbered sections. Key functions:
 |---|---|
 | `frame()` | `requestAnimationFrame` loop. Runs physics at a fixed 120 Hz step with an accumulator, so it plays the same on 60/120/144 Hz screens. Then renders. |
 | `step()` | Dispatches one physics step based on the current state. |
-| `stepPlaying()` | One gameplay tick: platforms → hazards → lava → player → collisions → camera → score → generation → cleanup → particles. |
+| `stepPlaying()` | One gameplay tick: platforms → hazards → alarm floor → player → collisions → camera → score → generation → cleanup → particles. |
 | `updatePlayer()` | Acceleration/friction, screen wrap, jump with coyote time and input buffering, variable jump height, gravity, one-way platform landing. |
 | `landOn()` | Landing feedback plus platform effects (bounce, start crumbling or vanishing, +5 bonus). |
-| `checkHazards()` / `checkLava()` | Real hitbox collisions (circle vs. rectangle for saws and orbs, rectangle vs. rectangle for spikes, feet vs. lava surface). |
+| `checkHazards()` / `checkLava()` | Real hitbox collisions (circle vs. rectangle for saws and orbs, rectangle vs. rectangle for spikes, feet vs. the alarm floor surface). |
 | `addPlatform()` | Procedural generator. Picks type and gap from the stage, and keeps every platform within a reachable jump. Never places two unstable platforms in a row. Puts moving hazards on the side away from the route. |
 | `updateCamera()` | Smooth, upward-only camera that keeps the player in the lower-middle of the screen. |
 | `updateScore()` | Height-based score, stage changes, new-record celebration. |
@@ -107,9 +107,9 @@ The file is split into numbered sections. Key functions:
 ## Features
 
 - Full platformer physics: acceleration and friction, limited air control, variable jump height, coyote time, jump buffering, no midair double jumps.
-- Five platform types, three hazard types (saws, orbs, spikes) and a rising lava floor.
+- Five platform types, three hazard types (saws, orbs, spikes) and a rising laser alarm floor.
 - Procedural, always-reachable level generation with gradual, height-based difficulty.
-- Smooth vertical camera, parallax starfield, glowing neon visuals.
+- Prison look drawn entirely in code: concrete brick wall, barred windows, sweeping searchlights, a mugshot height chart, and a prisoner whose ball and chain drags along behind. Smooth vertical camera with parallax.
 - Particles for jump dust, landing rings, debris, embers and confetti. Camera shake and flash on death. Squash and stretch on the character.
 - HUD with score bump animation, best score, stage, height and time. Stage announcements and a "new record" celebration.
 - Main menu with an animated demo scene, plus pause, game-over and restart screens.

@@ -1445,17 +1445,21 @@
     const footY = y + h - 2;
     const ballX = footX - p.face * 14 - clamp(p.vx / 45, -6, 6);
     const ballY = grounded ? y + h - 5 : y + h + 4 - clamp(p.vy / 150, -6, 6);
-    c.fillStyle = '#8C9199';
+    c.strokeStyle = '#B4BAC4';
+    c.lineWidth = 1.2;
     for (let i = 1; i <= 4; i++) {
       const t = i / 5;
       c.beginPath();
-      c.arc(lerp(footX, ballX, t), lerp(footY, ballY, t) + Math.sin(t * Math.PI) * 2, 1.3, 0, Math.PI * 2);
-      c.fill();
+      c.arc(lerp(footX, ballX, t), lerp(footY, ballY, t) + Math.sin(t * Math.PI) * 2, 1.5, 0, Math.PI * 2);
+      c.stroke();
     }
-    c.fillStyle = '#2A2D33';
-    c.beginPath(); c.arc(ballX, ballY, 5, 0, Math.PI * 2); c.fill();
-    c.fillStyle = 'rgba(255,255,255,0.35)';
-    c.beginPath(); c.arc(ballX - 1.5, ballY - 1.5, 1.6, 0, Math.PI * 2); c.fill();
+    c.fillStyle = '#5B626D';
+    c.beginPath(); c.arc(ballX, ballY, 5.5, 0, Math.PI * 2); c.fill();
+    c.strokeStyle = '#C9CED6';
+    c.lineWidth = 1;
+    c.stroke();
+    c.fillStyle = 'rgba(255,255,255,0.55)';
+    c.beginPath(); c.arc(ballX - 1.6, ballY - 1.6, 1.7, 0, Math.PI * 2); c.fill();
 
     // ---- body (squash & stretch around the feet) ----
     c.translate(x + w / 2, y + h);
