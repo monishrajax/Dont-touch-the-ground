@@ -16,20 +16,26 @@
 
       <!-- ============ HUD (visible while playing / paused / game over) ============ -->
       <div id="hud" aria-live="off">
-        <div class="hud-left">
-          <div class="hud-label">SCORE</div>
-          <div id="hudScore" class="hud-score">0</div>
-          <div class="hud-sub">BEST <b id="hudBest">0</b></div>
-          <!-- live multiplayer leaderboard (only shown in multiplayer) -->
-          <ol id="mpBoard" class="mp-board"></ol>
-        </div>
-        <div class="hud-right">
+        <!-- top bar: score | stage + height/time | buttons -->
+        <div id="hudBar" class="hud-bar">
+          <div class="hud-score-block">
+            <div class="hud-label">SCORE</div>
+            <div id="hudScore" class="hud-score">0</div>
+            <div class="hud-sub">BEST <b id="hudBest">0</b></div>
+          </div>
+          <div class="hud-mid">
+            <div id="hudStage" class="chip">STAGE 1</div>
+            <div class="hud-sub"><b id="hudHeight">0</b> m &middot; <b id="hudTime">0:00</b></div>
+          </div>
           <div class="hud-btns">
             <button class="icon-btn" data-action="pause" title="Pause (P / Esc)" aria-label="Pause">&#10074;&#10074;</button>
             <button class="icon-btn mute-btn" data-action="mute" title="Mute / unmute (M)" aria-label="Toggle sound">&#9834;</button>
           </div>
-          <div id="hudStage" class="chip">STAGE 1</div>
-          <div class="hud-sub"><b id="hudHeight">0</b> m &middot; <b id="hudTime">0:00</b></div>
+        </div>
+        <!-- live multiplayer scoreboard (top-right corner, multiplayer only) -->
+        <div id="mpBoardWrap" class="mp-board-wrap">
+          <div class="mp-board-title">LIVE SCORES</div>
+          <ol id="mpBoard" class="mp-board"></ol>
         </div>
       </div>
 
@@ -43,18 +49,29 @@
           <p class="subtitle">One jump away from game over.</p>
         </div>
 
-        <button class="btn primary" data-action="play">&#9654; PLAY</button>
-        <button class="btn" data-action="mp">&#9673; MULTIPLAYER</button>
+        <div class="menu-actions">
+          <button class="btn primary" data-action="play">&#9654; PLAY</button>
+          <button class="btn" data-action="mp">&#9673; MULTIPLAYER</button>
+        </div>
         <div class="best-line">BEST SCORE <b id="menuBest">0</b></div>
+        <div class="menu-small">
+          <button class="btn ghost small" data-action="help">? HOW TO PLAY</button>
+          <button class="btn ghost small mute-btn" data-action="mute">&#9834; SOUND</button>
+        </div>
+        <p class="keys-hint"><kbd>&larr;</kbd><kbd>&rarr;</kbd> move &middot; <kbd>Space</kbd> jump &middot; <kbd>P</kbd> pause</p>
+      </section>
 
-        <div class="panel" id="instructions">
-          <h3>HOW TO PLAY</h3>
+      <!-- ============ HOW TO PLAY ============ -->
+      <section id="help" class="overlay dim" aria-label="How to play">
+        <h2 class="over-title">HOW TO PLAY</h2>
+        <div class="panel">
           <p>Hop between floating platforms and climb as high as you can. The glowing floor is lava &mdash; and it rises. Dodge saws, orbs and spikes. New dangers appear as you climb.</p>
           <ul class="controls">
             <li><span><kbd>A</kbd> <kbd>D</kbd> / <kbd>&larr;</kbd> <kbd>&rarr;</kbd></span> Move</li>
             <li><span><kbd>Space</kbd> <kbd>W</kbd> <kbd>&uarr;</kbd></span> Jump (hold = higher)</li>
             <li><span><kbd>P</kbd> / <kbd>Esc</kbd></span> Pause</li>
             <li><span><kbd>M</kbd></span> Mute</li>
+            <li><span>&#9664; &#9654; &nbsp;&#9650;</span> On phones: move &amp; jump</li>
           </ul>
           <div class="legend">
             <span><i class="sw normal"></i>Normal</span>
@@ -64,7 +81,7 @@
             <span><i class="sw crumble"></i>Crumbling</span>
           </div>
         </div>
-        <button class="btn ghost small mute-btn" data-action="mute">&#9834; SOUND</button>
+        <button class="btn primary" data-action="helpBack">GOT IT</button>
       </section>
 
       <!-- ============ PAUSE ============ -->
@@ -161,6 +178,8 @@
     </div>
   </main>
 
+  <!-- invisible helper: lets game.js read the phone's safe-area (notch) insets -->
+  <div id="safeProbe" aria-hidden="true"></div>
   <noscript><p style="color:#fff;text-align:center;margin-top:20vh">This game needs JavaScript enabled.</p></noscript>
   <script src="net.js"></script>
   <script src="game.js"></script>
