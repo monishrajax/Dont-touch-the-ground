@@ -30,7 +30,9 @@
      1. CONSTANTS & TUNING
      ================================================================== */
   const W = 480;                 // world/view width
-  const H = 720;                 // view height
+  const H_MIN = 720;             // normal view height (2:3)
+  const H_MAX = 960;             // tall phones get to see up to this much
+  let H = H_MIN;                 // current view height (set by resize())
   const START_Y = 580;           // top of the starting platform
   const STEP = 1 / 120;          // fixed physics timestep (seconds)
 
@@ -248,32 +250,48 @@
     mpName: $('mpName'), mpCode: $('mpCode'), mpStatus: $('mpStatus'),
     lobbyCode: $('lobbyCode'), lobbyPlayers: $('lobbyPlayers'), lobbyStatus: $('lobbyStatus'),
     mpStartBtn: $('mpStartBtn'), mpBoard: $('mpBoard'), specText: $('specText'),
+    hudBar: $('hudBar'), mpBoardWrap: $('mpBoardWrap'),
     resultsWinner: $('resultsWinner'), resultsList: $('resultsList'), resultsNote: $('resultsNote'),
     overlays: {
-      menu: $('menu'), paused: $('pause'), gameover: $('gameover'),
+      menu: $('menu'), help: $('help'), paused: $('pause'), gameover: $('gameover'),
       mp: $('mp'), lobby: $('lobby'), results: $('results'),
     },
   };
 
   let viewScale = 1; // world units -> device pixels
 
-  /** Fit the 480x720 game into the window, keeping its aspect ratio and using
-   *  devicePixelRatio for sharp graphics. Logic coordinates never change. */
+  /** Phone notch / home-bar insets in CSS pixels (0 on normal screens). */
+  function safeArea() {
+    const cs = getComputedStyle($('safeProbe'));
+    return {
+      top: parseFloat(cs.paddingTop) || 0, right: parseFloat(cs.paddingRight) || 0,
+      bottom: parseFloat(cs.paddingBottom) || 0, left: parseFloat(cs.paddingLeft) || 0,
+    };
+  }
+
+  /** Fit the game into the window. The world is always 480 units wide; the
+   *  view is 720 tall, or taller (up to 960) on tall screens like phones so
+   *  there are no empty bars. devicePixelRatio keeps graphics sharp. */
   function resize() {
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const s = Math.min(vw / W, vh / H);
+    const safe = safeArea();
+    const vw = window.innerWidth - safe.left - safe.right;
+    const vh = window.innerHeight - safe.top - safe.bottom;
+    const isTouch = document.body.classList.contains('is-touch');
+    const s = Math.min(vw / W, vh / H_MIN);
+    const fontPx = Math.max(10, 17 * s);
+
+    // Touch controls go underneath the game if the screen has spare height.
+    const barH = fontPx * 6.6;
+    const below = isTouch && vh - H_MIN * s >= barH;
+    H = clamp(Math.floor((vh - (below ? barH : 0)) / s), H_MIN, H_MAX);
+
     const cssW = Math.floor(W * s);
     const cssH = Math.floor(H * s);
-    const fontPx = Math.max(10, 17 * s);
     stageEl.style.width = cssW + 'px';
     stageEl.style.height = cssH + 'px';
     stageEl.style.fontSize = fontPx + 'px';
 
-    // Touch controls go underneath the game if the screen has spare height.
     const touchBar = document.querySelector('.touch');
-    const isTouch = document.body.classList.contains('is-touch');
-    const below = isTouch && vh - cssH >= fontPx * 6.6;
     document.body.classList.toggle('touch-below', below);
     touchBar.style.fontSize = fontPx + 'px';
     touchBar.style.width = below ? cssW + 'px' : '';
@@ -281,6 +299,7 @@
     canvas.width = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
     viewScale = canvas.width / W;
+    measureHud();
   }
 
   /* ==================================================================
@@ -346,6 +365,9 @@
         break;
       case 'mp':
         if (code === 'Escape') goToMenu();
+        break;
+      case 'help':
+        if (confirmKey || code === 'Escape') { e.preventDefault(); setState('menu'); }
         break;
       case 'lobby':
         if (code === 'Enter' && Net.role === 'host') { e.preventDefault(); hostStartMatch(); }
@@ -465,8 +487,8 @@
     platforms = [];
     hazards = [];
     particles = [];
-    camY = 0;
-    lavaY = H - LAVA_MIN_VISIBLE;
+    camY = H_MIN - H; // taller screens see extra sky; the bottom lines up the same everywhere
+    lavaY = camY + H - LAVA_MIN_VISIBLE;
     shake = 0;
     flash = 0;
     run = newRunData();
@@ -943,8 +965,8 @@
     run = newRunData();
     particles = [];
     hazards = [];
-    camY = 0;
-    lavaY = H - LAVA_MIN_VISIBLE;
+    camY = H_MIN - H; // taller screens see extra sky; the bottom lines up the same everywhere
+    lavaY = camY + H - LAVA_MIN_VISIBLE;
     shake = 0;
     flash = 0;
     platforms = [
@@ -1009,7 +1031,8 @@
      ================================================================== */
   function initStars() {
     for (let i = 0; i < 80; i++) {
-      stars.push({ x: rand(0, W), y: rand(0, H), z: rand(0.1, 1), tw: rand(0, 6.28), s: rand(0.6, 1.8) });
+      // y is stored as 0..1 so stars fill the view whatever its height
+      stars.push({ x: rand(0, W), y: Math.random(), z: rand(0.1, 1), tw: rand(0, 6.28), s: rand(0.6, 1.8) });
     }
   }
 
@@ -1070,6 +1093,26 @@
     c.restore();
   }
 
+  // Where the HUD bar and the scoreboard sit, in world units (kept up to date
+  // by measureHud) so the off-screen arrows never hide underneath them.
+  const hudBox = { barBottom: 96, boardLeft: W, boardBottom: 0 };
+
+  function measureHud() {
+    const st = stageEl.getBoundingClientRect();
+    if (!st.width) return;
+    const k = W / st.width;
+    const bar = ui.hudBar.getBoundingClientRect();
+    hudBox.barBottom = (bar.bottom - st.top) * k - 16; // the bottom of the bar is a soft fade
+    const b = ui.mpBoardWrap.getBoundingClientRect();
+    if (b.width) {
+      hudBox.boardLeft = (b.left - st.left) * k;
+      hudBox.boardBottom = (b.bottom - st.top) * k;
+    } else {
+      hudBox.boardLeft = W;
+      hudBox.boardBottom = 0;
+    }
+  }
+
   /** Little arrows at the top/bottom edge pointing at players you can't see. */
   function drawOffscreenPlayers(c) {
     c.save();
@@ -1078,11 +1121,12 @@
     for (const r of remotes.values()) {
       if (!r.alive) continue;
       const sy = r.y - camY;
-      const above = sy + r.h < 96;   // hidden behind the HUD or above the view
+      const above = sy + r.h < hudBox.barBottom;   // hidden behind the HUD or above the view
       const below = sy > H - 20;
       if (!above && !below) continue;
       const x = clamp(r.x + r.w / 2, 18, W - 18);
-      const y = above ? 112 : H - 66;
+      let y = above ? hudBox.barBottom + 16 : H - 66;
+      if (above && x > hudBox.boardLeft - 40) y = Math.max(y, hudBox.boardBottom + 16);
       const dir = above ? -1 : 1;
       c.globalAlpha = 0.85;
       c.fillStyle = r.look.color;
@@ -1140,7 +1184,7 @@
     // twinkling parallax stars
     c.fillStyle = '#ffffff';
     for (const s of stars) {
-      const y = (((s.y - camY * s.z * 0.25) % H) + H) % H;
+      const y = (((s.y * H - camY * s.z * 0.25) % H) + H) % H;
       c.globalAlpha = (0.25 + 0.55 * s.z) * (0.6 + 0.4 * Math.sin(visualTime * 2 + s.tw));
       c.fillRect(s.x, y, s.s, s.s);
     }
@@ -1579,6 +1623,8 @@
       case 'pause': togglePause(); break;
       case 'menu': goToMenu(); break;
       case 'mute': toggleMute(); break;
+      case 'help': if (state === 'menu') setState('help'); break;
+      case 'helpBack': if (state === 'help') setState('menu'); break;
       // ---- multiplayer ----
       case 'mp': openMultiplayer(); break;
       case 'mpHost': hostGame(); break;
@@ -2023,24 +2069,38 @@
     }
   }
 
+  /** Live scoreboard in the top-right corner: rank, colour, name, score. */
   function updateBoard() {
     const rows = [{ name: 'You', look: myLook, score: run.score, alive: !run.dead, me: true }];
     for (const r of remotes.values()) rows.push({ name: r.name, look: r.look, score: r.score, alive: r.alive });
     rows.sort((a, b) => b.score - a.score);
     ui.mpBoard.textContent = '';
-    for (const row of rows) {
+    rows.forEach((row, i) => {
       const li = document.createElement('li');
       if (!row.alive) li.classList.add('out');
       if (row.me) li.classList.add('me');
+      const rank = document.createElement('span');
+      rank.className = 'rank';
+      rank.textContent = i + 1;
       const dot = document.createElement('i');
       dot.style.background = row.look.color;
+      dot.style.color = row.look.color;
       const name = document.createElement('span');
+      name.className = 'name';
       name.textContent = row.name;
+      li.append(rank, dot, name);
+      if (!row.alive) {
+        const out = document.createElement('span');
+        out.className = 'out-tag';
+        out.textContent = 'OUT';
+        li.append(out);
+      }
       const score = document.createElement('b');
       score.textContent = row.score;
-      li.append(dot, name, score);
+      li.append(score);
       ui.mpBoard.append(li);
-    }
+    });
+    measureHud();
     if (run.spectating) {
       ui.specText.textContent = 'Score ' + run.score + ' · ' + (run.spectateName ? 'watching ' + run.spectateName : 'waiting for results…');
     }
@@ -2118,7 +2178,7 @@
 
   function step(dt) {
     if (state === 'playing') stepPlaying(dt);
-    else if (state === 'menu' || state === 'mp' || state === 'lobby') stepMenu(dt);
+    else if (state === 'menu' || state === 'help' || state === 'mp' || state === 'lobby') stepMenu(dt);
     else if (state === 'gameover' || state === 'results') {
       run.clock += dt;
       updatePlatforms(dt, run.clock);
@@ -2237,6 +2297,7 @@
     get run() { return run; },
     get lavaY() { return lavaY; },
     get camY() { return camY; },
+    get viewHeight() { return H; },
     get mode() { return mode; },
     remotes,
     mp,
