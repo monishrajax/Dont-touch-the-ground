@@ -15,6 +15,7 @@
      10. Menu attract scene
      11. Rendering
      12. Game-state management (menu / playing / paused / gameover)
+     12b. Multiplayer (lobby, match, ghosts, results - transport is in net.js)
      13. Main loop & boot
 
    World coordinates: the game world is 480 units wide. "y" grows downward,
@@ -79,6 +80,18 @@
 
   const STORE_BEST = 'dttf.best';
   const STORE_SETTINGS = 'dttf.settings';
+  const STORE_NAME = 'dttf.name';
+
+  // Character colour schemes. Index 0 is the default (single player / host).
+  const LOOKS = [
+    { top: '#5ef2ff', bottom: '#7c3aed', leg: '#7dd3fc', color: '#00E5FF' }, // cyan
+    { top: '#ff8ad8', bottom: '#be185d', leg: '#fbcfe8', color: '#FF4DD2' }, // pink
+    { top: '#ffe27a', bottom: '#c2410c', leg: '#fef3c7', color: '#FFD23F' }, // yellow
+    { top: '#8affc1', bottom: '#047857', leg: '#bbf7d0', color: '#39FF88' }, // green
+    { top: '#d0b0ff', bottom: '#5b21b6', leg: '#ddd6fe', color: '#B583FF' }, // violet
+    { top: '#ffb37a', bottom: '#b91c1c', leg: '#fed7aa', color: '#FF8A3D' }, // orange
+  ];
+  const MAX_PLAYERS = LOOKS.length;
 
   /* ==================================================================
      2. HELPERS
@@ -98,10 +111,23 @@
     c.closePath();
   }
 
-  function weightedPick(weights) {
+  /** Small seeded random generator (mulberry32). The same seed always gives
+   *  the same numbers, which is how every multiplayer player gets the same tower. */
+  function seededRandom(seed) {
+    let a = seed >>> 0;
+    return function () {
+      a = (a + 0x6D2B79F5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function weightedPick(weights, rng = Math.random) {
     let total = 0;
     for (const k in weights) total += weights[k];
-    let r = Math.random() * total;
+    let r = rng() * total;
     for (const k in weights) {
       r -= weights[k];
       if (r <= 0) return k;
@@ -196,6 +222,9 @@
     click()   { this.tone(720, 0.05, { vol: 0.035 }); },
     stage()   { this.tone(523, 0.1, { type: 'triangle', vol: 0.06 }); this.tone(784, 0.16, { type: 'triangle', vol: 0.06, delay: 0.1 }); },
     record()  { [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.16, { type: 'triangle', vol: 0.07, delay: i * 0.09 })); },
+    tick()    { this.tone(440, 0.12, { type: 'triangle', vol: 0.07 }); },
+    go()      { this.tone(880, 0.3, { type: 'triangle', vol: 0.08 }); },
+    join()    { this.tone(660, 0.08, { type: 'sine', vol: 0.06 }); this.tone(990, 0.12, { type: 'sine', vol: 0.06, delay: 0.08 }); },
     gameOver() {
       this.noise(0.35, 0.14);
       [392, 294, 220, 131].forEach((f, i) => this.tone(f, 0.22, { type: 'sawtooth', vol: 0.05, delay: 0.08 + i * 0.13 }));
@@ -215,7 +244,15 @@
     menuBest: $('menuBest'), overScore: $('overScore'), overBest: $('overBest'),
     overPrev: $('overPrev'), overCause: $('overCause'), overDetail: $('overDetail'),
     newRecord: $('newRecord'),
-    overlays: { menu: $('menu'), paused: $('pause'), gameover: $('gameover') },
+    // multiplayer
+    mpName: $('mpName'), mpCode: $('mpCode'), mpStatus: $('mpStatus'),
+    lobbyCode: $('lobbyCode'), lobbyPlayers: $('lobbyPlayers'), lobbyStatus: $('lobbyStatus'),
+    mpStartBtn: $('mpStartBtn'), mpBoard: $('mpBoard'), specText: $('specText'),
+    resultsWinner: $('resultsWinner'), resultsList: $('resultsList'), resultsNote: $('resultsNote'),
+    overlays: {
+      menu: $('menu'), paused: $('pause'), gameover: $('gameover'),
+      mp: $('mp'), lobby: $('lobby'), results: $('results'),
+    },
   };
 
   let viewScale = 1; // world units -> device pixels
@@ -266,7 +303,7 @@
   }
 
   function pressJump() {
-    if (state === 'playing') input.jumpBuffer = PHYS.jumpBuffer;
+    if (state === 'playing' && run.countdown <= 0) input.jumpBuffer = PHYS.jumpBuffer;
   }
 
   const KEYS_LEFT = ['KeyA', 'ArrowLeft'];
@@ -276,6 +313,17 @@
 
   function onKeyDown(e) {
     const code = e.code;
+    // Typing a name or game code: let the text field have the keys.
+    if (e.target && e.target.tagName === 'INPUT') {
+      if (code === 'Enter') {
+        e.preventDefault();
+        // Enter joins if a code has been typed, otherwise hosts.
+        if (state === 'mp') handleAction(ui.mpCode.value.trim() ? 'mpJoin' : 'mpHost');
+      } else if (code === 'Escape') {
+        e.target.blur();
+      }
+      return;
+    }
     if (KEYS_BLOCK.has(code)) e.preventDefault(); // never scroll the page
     Sound.init();
 
@@ -294,7 +342,16 @@
         break;
       case 'playing':
         if (code === 'KeyP' || code === 'Escape') togglePause();
-        else if (code === 'KeyR') startGame(true);
+        else if (code === 'KeyR' && mode === 'solo') startGame(true);
+        break;
+      case 'mp':
+        if (code === 'Escape') goToMenu();
+        break;
+      case 'lobby':
+        if (code === 'Enter' && Net.role === 'host') { e.preventDefault(); hostStartMatch(); }
+        break;
+      case 'results':
+        if (code === 'Enter' && Net.role === 'host') { e.preventDefault(); hostStartMatch(); }
         break;
       case 'paused':
         if (code === 'KeyP' || code === 'Escape' || code === 'Enter') { e.preventDefault(); resume(); }
@@ -342,7 +399,10 @@
   /* ==================================================================
      6. WORLD STATE
      ================================================================== */
-  let state = 'menu';          // 'menu' | 'playing' | 'paused' | 'gameover'
+  let state = 'menu';          // 'menu' | 'playing' | 'paused' | 'gameover' | 'mp' | 'lobby' | 'results'
+  let mode = 'solo';           // 'solo' | 'multi'
+  let myLook = LOOKS[0];       // colours of the local player
+  const remotes = new Map();   // multiplayer: other players' ghosts, by id
   let platforms = [];
   let hazards = [];
   let particles = [];
@@ -391,11 +451,17 @@
       score: 0, bonus: 0, maxHeightPx: 0, heightM: 0, time: 0, stage: 1,
       platformsLanded: 0, prevBest: best, celebrated: false,
       dead: false, deathTimer: 0, cause: '', lastSecond: -1,
+      clock: 0,          // world clock (moving platforms/hazards); keeps running after death
+      countdown: 0,      // multiplayer "3, 2, 1" before the run starts
+      goFlash: 0,
+      spectating: false, // multiplayer: fallen and watching the others
+      spectateName: '',
     };
   }
 
-  /** Completely fresh run: every piece of per-run data is rebuilt here. */
-  function resetRun() {
+  /** Completely fresh run: every piece of per-run data is rebuilt here.
+   *  `seed` fixes the level layout (multiplayer); omit it for a random tower. */
+  function resetRun(seed) {
     platforms = [];
     hazards = [];
     particles = [];
@@ -411,7 +477,8 @@
     player = makePlayer(W / 2 - PLAYER_W / 2, START_Y - PLAYER_H);
     player.ground = start;
 
-    gen = { lastCx: W / 2, lastY: START_Y, lastType: 'normal', count: 0, unsafeRun: 0, sinceHazard: 0 };
+    const s = seed === undefined ? Math.floor(Math.random() * 4294967296) : seed;
+    gen = { lastCx: W / 2, lastY: START_Y, lastType: 'normal', count: 0, unsafeRun: 0, sinceHazard: 0, rng: seededRandom(s) };
     generatePlatforms();
     updateHud(true);
   }
@@ -427,6 +494,10 @@
   }
 
   function addPlatform() {
+    // All randomness here comes from the seeded generator, so a given seed
+    // always builds exactly the same tower (needed for multiplayer).
+    const R = gen.rng;
+    const rand = (a, b) => a + R() * (b - a);
     const heightM = (START_Y - gen.lastY) / 10;
     // Use a slightly lower height so new mechanics appear roughly when the
     // player (who is a few platforms below the generator) reaches that stage.
@@ -444,16 +515,16 @@
         bouncy: stage >= 2 ? 7 : 0,
         vanish: stage >= 4 && unstableAllowed ? 10 + (d - 4) * 3 : 0,
         crumble: stage >= 5 && unstableAllowed ? 9 + (d - 5) * 3 : 0,
-      });
+      }, R);
     }
 
     // ---- decide whether this gap gets a hazard ----
     let hazardKind = null;
     if (stage >= 3 && gen.sinceHazard >= 2 && !learning) {
       const movingInvolved = type === 'moving' || gen.lastType === 'moving';
-      if (Math.random() < Math.min(0.55, 0.25 + 0.05 * (stage - 3)) && (!movingInvolved || stage >= 6)) {
-        if (type === 'normal' && Math.random() < 0.4) hazardKind = 'spikes';
-        else hazardKind = stage >= 5 && Math.random() < 0.4 ? 'orb' : 'saw';
+      if (R() < Math.min(0.55, 0.25 + 0.05 * (stage - 3)) && (!movingInvolved || stage >= 6)) {
+        if (type === 'normal' && R() < 0.4) hazardKind = 'spikes';
+        else hazardKind = stage >= 5 && R() < 0.4 ? 'orb' : 'saw';
       }
     }
 
@@ -472,7 +543,7 @@
     const margin = w / 2 + range + 6;
     let cx = gen.lastCx + rand(-dxMax, dxMax);
     // add some variety: avoid stacking platforms perfectly on top of each other
-    if (Math.abs(cx - gen.lastCx) < 30) cx += (Math.random() < 0.5 ? -1 : 1) * 40;
+    if (Math.abs(cx - gen.lastCx) < 30) cx += (R() < 0.5 ? -1 : 1) * 40;
     cx = clamp(cx, margin, W - margin);
 
     const y = gen.lastY - dy;
@@ -487,7 +558,7 @@
 
     // ---- hazards ----
     if (hazardKind === 'spikes') {
-      p.spikes = { side: Math.random() < 0.5 ? 0 : 1, w: 34 };
+      p.spikes = { side: R() < 0.5 ? 0 : 1, w: 34 };
     } else if (hazardKind) {
       // Place moving hazards in the middle of the gap, on the side of the
       // screen AWAY from the direct route between the two platforms.
@@ -771,7 +842,7 @@
     flash = 0.35;
     Sound.gameOver();
     const p = player;
-    const color = cause === 'lava' ? COLORS.red : COLORS.cyan;
+    const color = cause === 'lava' ? COLORS.red : myLook.color;
     for (let i = 0; i < 36; i++) {
       spawnParticle(p.x + p.w / 2, p.y + p.h / 2, rand(-300, 300), rand(-420, 80), rand(0.6, 1.2), rand(2.5, 5), i % 3 ? color : COLORS.amber, { g: 900 });
     }
@@ -780,22 +851,45 @@
 
   /** One fixed-timestep update of the running game. */
   function stepPlaying(dt) {
+    // Multiplayer "3, 2, 1, GO" - the world is frozen until it finishes.
+    if (run.countdown > 0) {
+      const before = Math.ceil(run.countdown);
+      run.countdown -= dt;
+      const after = Math.ceil(Math.max(0, run.countdown));
+      if (after !== before) {
+        if (after > 0) Sound.tick();
+        else { Sound.go(); run.goFlash = 0.7; }
+      }
+      updateRemotes(dt);
+      updateEffects(dt);
+      return;
+    }
+    if (run.goFlash > 0) run.goFlash -= dt;
+
+    run.clock += dt;
     if (!run.dead) run.time += dt;
-    updatePlatforms(dt, run.time);
-    updateHazards(dt, run.time);
-    updateLava(dt);
+    updatePlatforms(dt, run.clock);
+    updateHazards(dt, run.clock);
+    updateRemotes(dt);
 
     if (!run.dead) {
+      updateLava(dt);
       updatePlayer(dt);
       checkHazards();
       if (!run.dead) checkLava();
       updateCamera(dt);
       updateScore();
-      generatePlatforms();
-      cleanupWorld();
     } else {
       run.deathTimer += dt;
-      if (run.deathTimer > 0.9) endRun();
+      if (run.spectating) updateSpectate(dt);
+      else if (run.deathTimer > 0.9) {
+        if (mode === 'multi') enterSpectate();
+        else endRun();
+      }
+    }
+    if (state === 'playing') {
+      generatePlatforms();
+      cleanupWorld();
     }
     updateEffects(dt);
   }
@@ -874,9 +968,9 @@
   }
 
   function stepMenu(dt) {
-    run.time += dt;
-    updatePlatforms(dt, run.time);
-    updateHazards(dt, run.time);
+    run.clock += dt;
+    updatePlatforms(dt, run.clock);
+    updateHazards(dt, run.clock);
     updateEffects(dt);
 
     const a = platforms[demo.seq[demo.i]];
@@ -938,20 +1032,87 @@
       if (h.y - camY > H + 40 || h.y - camY < -60) continue;
       drawHazard(c, h);
     }
-    if (player && player.visible) {
-      drawPlayer(c, player.x, player.y);
-      if (player.x < 0) drawPlayer(c, player.x + W, player.y);           // wrap copy
-      else if (player.x + player.w > W) drawPlayer(c, player.x - W, player.y);
+    // other players are drawn as see-through ghosts behind you
+    for (const r of remotes.values()) {
+      if (!r.alive) continue;
+      drawPlayerWrapped(c, r, r.look, 0.5);
+      drawNameTag(c, r);
     }
+    if (player && player.visible) drawPlayerWrapped(c, player, myLook, 1);
     drawParticles(c);
     drawLava(c);
     c.restore();
 
     drawDangerVignette(c);
+    if (mode === 'multi' && state === 'playing') drawOffscreenPlayers(c);
+    drawCountdown(c);
     if (flash > 0) {
       c.fillStyle = 'rgba(255,255,255,' + (flash * 0.6).toFixed(3) + ')';
       c.fillRect(0, 0, W, H);
     }
+  }
+
+  /** Draw a character, plus a second copy when it is wrapping across a screen edge. */
+  function drawPlayerWrapped(c, p, look, alpha) {
+    drawPlayer(c, p, p.x, p.y, look, alpha);
+    if (p.x < 0) drawPlayer(c, p, p.x + W, p.y, look, alpha);
+    else if (p.x + p.w > W) drawPlayer(c, p, p.x - W, p.y, look, alpha);
+  }
+
+  function drawNameTag(c, r) {
+    c.save();
+    c.font = 'bold 11px "Trebuchet MS", sans-serif';
+    c.textAlign = 'center';
+    c.fillStyle = r.look.color;
+    c.globalAlpha = 0.85;
+    const x = clamp(r.x + r.w / 2, 24, W - 24);
+    c.fillText(r.name, x, r.y - 19);
+    c.restore();
+  }
+
+  /** Little arrows at the top/bottom edge pointing at players you can't see. */
+  function drawOffscreenPlayers(c) {
+    c.save();
+    c.font = 'bold 10px "Trebuchet MS", sans-serif';
+    c.textAlign = 'center';
+    for (const r of remotes.values()) {
+      if (!r.alive) continue;
+      const sy = r.y - camY;
+      const above = sy + r.h < 96;   // hidden behind the HUD or above the view
+      const below = sy > H - 20;
+      if (!above && !below) continue;
+      const x = clamp(r.x + r.w / 2, 18, W - 18);
+      const y = above ? 112 : H - 66;
+      const dir = above ? -1 : 1;
+      c.globalAlpha = 0.85;
+      c.fillStyle = r.look.color;
+      c.beginPath();
+      c.moveTo(x, y + dir * 8);
+      c.lineTo(x - 6, y);
+      c.lineTo(x + 6, y);
+      c.fill();
+      const diff = r.height - run.heightM;
+      c.fillText(r.name + ' ' + (diff >= 0 ? '+' : '') + diff + 'm', x, y - dir * 10 + (above ? 4 : 0));
+    }
+    c.restore();
+  }
+
+  /** "3, 2, 1, GO!" at the start of a multiplayer round. */
+  function drawCountdown(c) {
+    if (state !== 'playing' || !run || (run.countdown <= 0 && run.goFlash <= 0)) return;
+    const counting = run.countdown > 0;
+    const txt = counting ? String(Math.ceil(run.countdown)) : 'GO!';
+    const frac = counting ? run.countdown % 1 : clamp(run.goFlash / 0.7, 0, 1);
+    c.save();
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.font = '900 ' + Math.round(80 + frac * 40) + 'px "Trebuchet MS", sans-serif';
+    c.fillStyle = counting ? COLORS.text : COLORS.green;
+    c.shadowColor = counting ? COLORS.cyan : COLORS.green;
+    c.shadowBlur = 30;
+    c.globalAlpha = counting ? 1 : frac;
+    c.fillText(txt, W / 2, H * 0.4);
+    c.restore();
   }
 
   function drawBackground(c) {
@@ -1129,12 +1290,13 @@
     c.restore();
   }
 
-  /** The hero: a little neon robot with a visor, legs and squash/stretch. */
-  function drawPlayer(c, x, y) {
-    const p = player;
+  /** The hero: a little neon robot with a visor, legs and squash/stretch.
+   *  `p` is the local player or a remote ghost; `look` picks its colours. */
+  function drawPlayer(c, p, x, y, look, alpha) {
     const w = p.w, h = p.h;
-    const grounded = p.ground !== null;
+    const grounded = !!p.ground;
     c.save();
+    c.globalAlpha = alpha;
     c.translate(x + w / 2, y + h);
 
     // squash & stretch
@@ -1155,18 +1317,18 @@
     const moving = Math.abs(p.vx) > 20;
     const swing = grounded && moving ? Math.sin(p.runPhase) * 4 : 0;
     const tuck = grounded ? 0 : p.vy < 0 ? 4 : -1;
-    c.fillStyle = '#7dd3fc';
+    c.fillStyle = look.leg;
     c.fillRect(-9, -9 - Math.max(0, swing) - tuck, 7, 9);
     c.fillRect(2, -9 - Math.max(0, -swing) - tuck, 7, 9);
 
     // body
     const bob = grounded && moving ? Math.abs(Math.sin(p.runPhase)) * 1.5 : 0;
     const by = -h - bob;
-    c.shadowColor = COLORS.cyan;
+    c.shadowColor = look.color;
     c.shadowBlur = 16;
     const g = c.createLinearGradient(0, by, 0, by + h - 8);
-    g.addColorStop(0, '#5ef2ff');
-    g.addColorStop(1, '#7c3aed');
+    g.addColorStop(0, look.top);
+    g.addColorStop(1, look.bottom);
     c.fillStyle = g;
     roundRect(c, -w / 2, by, w, h - 8, 8);
     c.fill();
@@ -1307,7 +1469,10 @@
   /** Start a fresh run. `force` allows restarting a run that is in progress (R key). */
   function startGame(force) {
     if (state === 'playing' && !force) return; // guard against double triggers (key + click)
+    if (mode === 'multi') return;
     Sound.init();
+    myLook = LOOKS[0];
+    remotes.clear();
     resetRun();
     clearInput();
     ui.toast.classList.remove('show');
@@ -1316,6 +1481,11 @@
   }
 
   function togglePause() {
+    // A multiplayer match can't be paused for everyone; offer to leave instead.
+    if (mode === 'multi') {
+      if (state === 'playing') stageEl.classList.toggle('leave-open');
+      return;
+    }
     if (state === 'playing' && !run.dead) {
       setState('paused');
       clearInput();
@@ -1353,6 +1523,7 @@
   }
 
   function goToMenu() {
+    if (mode === 'multi' || Net.role) leaveMultiplayer();
     initMenuScene();
     ui.menuBest.textContent = best;
     ui.toast.classList.remove('show');
@@ -1408,7 +1579,533 @@
       case 'pause': togglePause(); break;
       case 'menu': goToMenu(); break;
       case 'mute': toggleMute(); break;
+      // ---- multiplayer ----
+      case 'mp': openMultiplayer(); break;
+      case 'mpHost': hostGame(); break;
+      case 'mpJoin': joinGame(); break;
+      case 'mpStart':
+      case 'mpAgain': hostStartMatch(); break;
+      case 'mpLobby': hostBackToLobby(); break;
+      case 'mpCopy': copyCode(); break;
+      case 'mpLeave':
+      case 'leaveConfirm': goToMenu(); break;
+      case 'leaveCancel': stageEl.classList.remove('leave-open'); break;
     }
+  }
+
+  /* ==================================================================
+     12b. MULTIPLAYER
+     Everyone climbs the same tower (shared seed) in their own copy of the
+     world and sees the others as ghosts. Each player simulates only
+     themselves and sends their position ~15 times a second; the host
+     relays it to everyone else. When everyone has fallen, the host
+     announces the results. The network transport lives in net.js.
+     ================================================================== */
+  const mp = {
+    myId: '',             // 'h' for the host, 'p1', 'p2'... for others
+    players: [],          // lobby roster: [{ id, name, color }]
+    inMatch: false,       // a round is running
+    roster: [],           // players taking part in the current round
+    alive: new Set(),     // host only: ids still climbing
+    finals: new Map(),    // host only: id -> final result
+    sendTimer: 0,
+    boardTimer: 0,
+    busy: false,          // a host/join request is in progress
+  };
+
+  // Never trust data from the network: coerce and limit everything.
+  const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
+  const cleanName = (n) => String(n || '').replace(/[^\p{L}\p{N} _.!?-]/gu, '').trim().slice(0, 12) || 'Player';
+  const colorIndex = (c) => clamp(Math.floor(num(c)), 0, LOOKS.length - 1);
+  const lookFor = (c) => LOOKS[colorIndex(c)];
+
+  function cleanRoster(list) {
+    if (!Array.isArray(list)) return [];
+    return list.slice(0, MAX_PLAYERS).map((p) => ({
+      id: String(p && p.id), name: cleanName(p && p.name), color: colorIndex(p && p.color),
+    }));
+  }
+
+  function cleanResults(list) {
+    if (!Array.isArray(list)) return [];
+    return list.slice(0, MAX_PLAYERS).map((r) => ({
+      id: String(r && r.id), name: cleanName(r && r.name), color: colorIndex(r && r.color),
+      score: Math.max(0, Math.floor(num(r && r.score))), height: Math.max(0, Math.floor(num(r && r.height))),
+      left: !!(r && r.left),
+    }));
+  }
+
+  function cleanState(m) {
+    return {
+      t: 'st',
+      x: clamp(num(m.x), -W, 2 * W), y: num(m.y),
+      vx: clamp(num(m.vx), -2000, 2000), vy: clamp(num(m.vy), -3000, 3000),
+      f: num(m.f) < 0 ? -1 : 1, g: m.g ? 1 : 0,
+      s: Math.max(0, Math.floor(num(m.s))), h: Math.max(0, Math.floor(num(m.h))),
+      l: num(m.l, H),
+    };
+  }
+
+  function myName() {
+    const name = cleanName(ui.mpName.value);
+    ui.mpName.value = name;
+    Store.set(STORE_NAME, name);
+    return name;
+  }
+
+  function mpStatus(text, isError) {
+    ui.mpStatus.textContent = text || '';
+    ui.mpStatus.classList.toggle('error', !!isError);
+  }
+
+  function setMode(next) {
+    mode = next;
+    stageEl.classList.toggle('multi', next === 'multi');
+    stageEl.classList.toggle('is-host', Net.role === 'host');
+  }
+
+  /** Disconnect and reset every piece of multiplayer state. */
+  function leaveMultiplayer() {
+    Net.leave();
+    mp.myId = '';
+    mp.players = [];
+    mp.roster = [];
+    mp.inMatch = false;
+    mp.alive.clear();
+    mp.finals.clear();
+    remotes.clear();
+    stageEl.classList.remove('spectating', 'leave-open');
+    myLook = LOOKS[0];
+    setMode('solo');
+  }
+
+  // ---------------- screens ----------------
+  function openMultiplayer() {
+    if (state !== 'menu' && state !== 'mp') initMenuScene();
+    mpStatus('');
+    setState('mp');
+  }
+
+  async function hostGame() {
+    if (mp.busy || state !== 'mp') return;
+    mp.busy = true;
+    const name = myName();
+    mpStatus('Creating game…');
+    try {
+      await Net.host();
+      if (state !== 'mp') { Net.leave(); return; } // player backed out meanwhile
+      mp.myId = 'h';
+      mp.players = [{ id: 'h', name, color: 0 }];
+      mp.inMatch = false;
+      setMode('multi');
+      enterLobby();
+      Sound.join();
+    } catch (err) {
+      Net.leave();
+      if (state === 'mp') mpStatus(Net.describe(err), true);
+    } finally {
+      mp.busy = false;
+    }
+  }
+
+  async function joinGame() {
+    if (mp.busy || state !== 'mp') return;
+    const code = Net.normalizeCode(ui.mpCode.value);
+    if (code.length !== Net.CODE_LEN) {
+      mpStatus('Enter the ' + Net.CODE_LEN + '-character code from your friend.', true);
+      ui.mpCode.focus();
+      return;
+    }
+    mp.busy = true;
+    const name = myName();
+    mpStatus('Joining ' + code + '…');
+    try {
+      await Net.join(code);
+      if (state !== 'mp') { Net.leave(); return; }
+      setMode('multi');
+      Net.send({ t: 'hello', name, v: 1 });
+      mpStatus('Connected! Waiting for the host…');
+    } catch (err) {
+      Net.leave();
+      if (state === 'mp') mpStatus(Net.describe(err), true);
+    } finally {
+      mp.busy = false;
+    }
+  }
+
+  function enterLobby() {
+    initMenuScene();
+    remotes.clear();
+    stageEl.classList.remove('spectating', 'leave-open');
+    renderLobby();
+    setState('lobby');
+  }
+
+  function tagEl(text) {
+    const b = document.createElement('b');
+    b.className = 'tag';
+    b.textContent = text;
+    return b;
+  }
+
+  function renderLobby() {
+    ui.lobbyCode.textContent = Net.code || '-----';
+    ui.lobbyPlayers.textContent = '';
+    for (const p of mp.players) {
+      const li = document.createElement('li');
+      const dot = document.createElement('i');
+      dot.className = 'dot';
+      dot.style.background = lookFor(p.color).color;
+      const name = document.createElement('span');
+      name.textContent = p.name; // textContent: names can never inject HTML
+      li.append(dot, name);
+      if (p.id === 'h') li.append(tagEl('HOST'));
+      if (p.id === mp.myId) li.append(tagEl('YOU'));
+      ui.lobbyPlayers.append(li);
+    }
+    const host = Net.role === 'host';
+    let status;
+    if (mp.inMatch) status = host ? 'A match is running.' : "A match is in progress - you'll join the next round.";
+    else if (host) status = mp.players.length < 2 ? 'Waiting for friends… (or start now to play alone)' : mp.players.length + ' players ready!';
+    else status = 'Waiting for the host to start…';
+    ui.lobbyStatus.textContent = status;
+    ui.mpStartBtn.disabled = mp.inMatch;
+  }
+
+  function copyCode() {
+    const code = Net.code;
+    if (!code) return;
+    // A link only helps if friends can open it, i.e. the game is hosted online.
+    const link = location.protocol === 'https:' ? location.origin + location.pathname + '?join=' + code : '';
+    const done = () => showToast(link ? 'Invite link copied!' : 'Code ' + code + ' copied!');
+    const fail = () => showToast('Your code: ' + code);
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link || code).then(done, fail);
+    else fail();
+  }
+
+  // ---------------- host logic ----------------
+  function hostBroadcastLobby() {
+    Net.broadcast({ t: 'lobby', players: mp.players, inMatch: mp.inMatch });
+    if (state === 'lobby') renderLobby();
+  }
+
+  function onHostMessage(from, msg) {
+    switch (msg.t) {
+      case 'hello': {
+        if (mp.players.some((p) => p.id === from)) return;
+        if (mp.players.length >= MAX_PLAYERS) {
+          Net.sendTo(from, { t: 'reject', reason: 'That game is full (' + MAX_PLAYERS + ' players max).' });
+          Net.kick(from);
+          return;
+        }
+        const used = new Set(mp.players.map((p) => p.color));
+        let color = 0;
+        while (used.has(color)) color++;
+        const name = cleanName(msg.name);
+        mp.players.push({ id: from, name, color });
+        Net.sendTo(from, { t: 'welcome', id: from });
+        hostBroadcastLobby();
+        showToast(name + ' joined');
+        Sound.join();
+        break;
+      }
+      case 'st': {
+        if (!mp.inMatch || !mp.alive.has(from)) return;
+        const s = cleanState(msg);
+        s.id = from; // the host decides who sent it, so nobody can fake another player
+        applyRemoteState(from, s);
+        Net.broadcast(s, from);
+        break;
+      }
+      case 'dead':
+        if (mp.inMatch) hostPlayerDone(from, msg);
+        break;
+    }
+  }
+
+  function onHostPeerLeave(id) {
+    const p = mp.players.find((pl) => pl.id === id);
+    mp.players = mp.players.filter((pl) => pl.id !== id);
+    if (mp.inMatch && mp.alive.has(id)) {
+      const r = remotes.get(id);
+      hostPlayerDone(id, { score: r ? r.score : 0, height: r ? r.height : 0, left: true });
+    }
+    if (p) showToast(p.name + ' left');
+    hostBroadcastLobby();
+  }
+
+  function hostStartMatch() {
+    if (Net.role !== 'host' || mp.inMatch) return;
+    if (state !== 'lobby' && state !== 'results') return;
+    const seed = Math.floor(Math.random() * 4294967296);
+    mp.roster = mp.players.map((p) => ({ ...p }));
+    mp.alive = new Set(mp.roster.map((p) => p.id));
+    mp.finals = new Map();
+    mp.inMatch = true;
+    Net.broadcast({ t: 'start', seed, roster: mp.roster });
+    beginMatch(seed, mp.roster);
+  }
+
+  /** Host: a player fell (or disconnected). Ends the round when nobody is left. */
+  function hostPlayerDone(id, data) {
+    if (!mp.alive.has(id)) return;
+    mp.alive.delete(id);
+    const p = mp.roster.find((r) => r.id === id) || { name: 'Player', color: 0 };
+    const result = {
+      id, name: p.name, color: p.color,
+      score: Math.max(0, Math.floor(num(data.score))),
+      height: Math.max(0, Math.floor(num(data.height))),
+      left: !!data.left,
+    };
+    mp.finals.set(id, result);
+    Net.broadcast({ t: 'dead', id, score: result.score, height: result.height }, id);
+    if (id !== mp.myId) markRemoteDead(id, result);
+    if (mp.alive.size === 0) hostFinishMatch();
+  }
+
+  function hostFinishMatch() {
+    mp.inMatch = false;
+    const list = [...mp.finals.values()].sort((a, b) => b.score - a.score);
+    Net.broadcast({ t: 'results', list });
+    Net.broadcast({ t: 'lobby', players: mp.players, inMatch: false });
+    showResults(list);
+  }
+
+  function hostBackToLobby() {
+    if (Net.role !== 'host' || mp.inMatch) return;
+    Net.broadcast({ t: 'toLobby' });
+    hostBroadcastLobby();
+    enterLobby();
+  }
+
+  // ---------------- client logic ----------------
+  function onClientMessage(msg) {
+    switch (msg.t) {
+      case 'welcome':
+        mp.myId = String(msg.id);
+        enterLobby();
+        Sound.join();
+        break;
+      case 'reject':
+        leaveMultiplayer();
+        openMultiplayer();
+        mpStatus(String(msg.reason || 'Could not join that game.').slice(0, 120), true);
+        break;
+      case 'lobby':
+        mp.players = cleanRoster(msg.players);
+        mp.inMatch = !!msg.inMatch;
+        if (state === 'lobby') renderLobby();
+        break;
+      case 'start':
+        if (!mp.myId) return;
+        beginMatch(Math.floor(num(msg.seed)) >>> 0, cleanRoster(msg.roster));
+        break;
+      case 'st': {
+        const id = String(msg.id);
+        if (id !== mp.myId) applyRemoteState(id, cleanState(msg));
+        break;
+      }
+      case 'dead':
+        markRemoteDead(String(msg.id), { score: Math.floor(num(msg.score)), height: Math.floor(num(msg.height)) });
+        break;
+      case 'results':
+        mp.inMatch = false;
+        // Players who joined mid-round stay in the lobby instead.
+        if (state !== 'lobby' && mp.roster.some((r) => r.id === mp.myId)) showResults(cleanResults(msg.list));
+        break;
+      case 'toLobby':
+        mp.inMatch = false;
+        enterLobby();
+        break;
+    }
+  }
+
+  // ---------------- the match itself (host and clients) ----------------
+  function beginMatch(seed, roster) {
+    mp.roster = roster;
+    mp.inMatch = true;
+    const meIndex = roster.findIndex((r) => r.id === mp.myId);
+    if (meIndex < 0) { // joined mid-round: wait in the lobby for the next one
+      if (state === 'lobby') renderLobby();
+      return;
+    }
+    Sound.init();
+    resetRun(seed);           // same seed => identical tower for everyone
+    run.countdown = 3;
+    Sound.tick();
+    myLook = lookFor(roster[meIndex].color);
+
+    // spread everyone out across the starting platform
+    const n = roster.length;
+    const startX = (i) => W / 2 - PLAYER_W / 2 + (i - (n - 1) / 2) * 24;
+    player.x = startX(meIndex);
+    remotes.clear();
+    roster.forEach((r, i) => {
+      if (r.id !== mp.myId) remotes.set(r.id, makeRemote(r, startX(i), START_Y - PLAYER_H));
+    });
+
+    stageEl.classList.remove('spectating', 'leave-open');
+    clearInput();
+    ui.toast.classList.remove('show');
+    accumulator = 0;
+    mp.sendTimer = 0;
+    mp.boardTimer = 1; // refresh the leaderboard right away
+    setState('playing');
+  }
+
+  function makeRemote(r, x, y) {
+    return {
+      id: r.id, name: r.name, look: lookFor(r.color),
+      x, y, tx: x, ty: y, w: PLAYER_W, h: PLAYER_H,
+      vx: 0, vy: 0, face: 1, ground: true, runPhase: 0, squash: 0,
+      score: 0, height: 0, lava: H - LAVA_MIN_VISIBLE, alive: true, age: 0,
+    };
+  }
+
+  function applyRemoteState(id, s) {
+    const r = remotes.get(id);
+    if (!r || !r.alive) return;
+    r.tx = s.x; r.ty = s.y;
+    r.vx = s.vx; r.vy = s.vy;
+    r.face = s.f; r.ground = !!s.g;
+    r.score = s.s; r.height = s.h;
+    r.lava = s.l;
+    r.age = 0;
+  }
+
+  function markRemoteDead(id, result) {
+    const r = remotes.get(id);
+    if (!r || !r.alive) return;
+    r.alive = false;
+    r.score = result.score;
+    r.height = result.height;
+    for (let i = 0; i < 20; i++) {
+      spawnParticle(r.x + r.w / 2, r.y + r.h / 2, rand(-220, 220), rand(-300, 60), rand(0.5, 1), rand(2, 4), r.look.color, { g: 800 });
+    }
+  }
+
+  /** Move ghosts smoothly toward their latest network position. Between
+   *  updates they keep moving with their last velocity (for a short while). */
+  function updateRemotes(dt) {
+    const k = Math.min(1, dt * 14);
+    for (const r of remotes.values()) {
+      r.age += dt;
+      if (r.age < 0.25) {
+        r.tx += r.vx * dt;
+        if (!r.ground) r.ty += r.vy * dt;
+      }
+      if (Math.abs(r.tx - r.x) > W / 2) r.x = r.tx; // wrapped across the screen edge: snap
+      else r.x += (r.tx - r.x) * k;
+      r.y += (r.ty - r.y) * k;
+      if (r.ground) r.runPhase += Math.abs(r.vx) * dt * 0.07;
+    }
+  }
+
+  /** Called every frame in multiplayer: send our state, refresh the leaderboard. */
+  function netTick(dt) {
+    mp.sendTimer += dt;
+    if (state === 'playing' && run.countdown <= 0 && !run.dead && mp.sendTimer >= 1 / 15) {
+      mp.sendTimer = 0;
+      const msg = {
+        t: 'st',
+        x: Math.round(player.x * 10) / 10, y: Math.round(player.y * 10) / 10,
+        vx: Math.round(player.vx), vy: Math.round(player.vy),
+        f: player.face, g: player.ground ? 1 : 0,
+        s: run.score, h: run.heightM, l: Math.round(lavaY),
+      };
+      if (Net.role === 'host') { msg.id = mp.myId; Net.broadcast(msg); }
+      else Net.send(msg);
+    }
+    mp.boardTimer += dt;
+    if (mp.boardTimer >= 0.25) {
+      mp.boardTimer = 0;
+      if (state === 'playing') updateBoard();
+    }
+  }
+
+  function updateBoard() {
+    const rows = [{ name: 'You', look: myLook, score: run.score, alive: !run.dead, me: true }];
+    for (const r of remotes.values()) rows.push({ name: r.name, look: r.look, score: r.score, alive: r.alive });
+    rows.sort((a, b) => b.score - a.score);
+    ui.mpBoard.textContent = '';
+    for (const row of rows) {
+      const li = document.createElement('li');
+      if (!row.alive) li.classList.add('out');
+      if (row.me) li.classList.add('me');
+      const dot = document.createElement('i');
+      dot.style.background = row.look.color;
+      const name = document.createElement('span');
+      name.textContent = row.name;
+      const score = document.createElement('b');
+      score.textContent = row.score;
+      li.append(dot, name, score);
+      ui.mpBoard.append(li);
+    }
+    if (run.spectating) {
+      ui.specText.textContent = 'Score ' + run.score + ' · ' + (run.spectateName ? 'watching ' + run.spectateName : 'waiting for results…');
+    }
+  }
+
+  /** Local player fell in multiplayer: report it and watch the others. */
+  function enterSpectate() {
+    run.spectating = true;
+    const final = run.score;
+    if (final > best) {
+      best = final;
+      Store.set(STORE_BEST, best);
+      ui.menuBest.textContent = best;
+    }
+    stageEl.classList.add('spectating');
+    updateBoard();
+    const data = { t: 'dead', score: final, height: run.heightM };
+    if (Net.role === 'host') hostPlayerDone(mp.myId, data);
+    else Net.send(data);
+  }
+
+  /** While spectating, the camera (and lava) follow the highest player still alive. */
+  function updateSpectate(dt) {
+    let leader = null;
+    for (const r of remotes.values()) {
+      if (r.alive && (!leader || r.y < leader.y)) leader = r;
+    }
+    run.spectateName = leader ? leader.name : '';
+    if (!leader) return;
+    const k = Math.min(1, dt * 3);
+    camY += (leader.y - H * 0.58 - camY) * k;
+    lavaY += (leader.lava - lavaY) * k;
+  }
+
+  function showResults(list) {
+    mp.inMatch = false;
+    stageEl.classList.remove('spectating', 'leave-open');
+    ui.resultsList.textContent = '';
+    list.forEach((r, i) => {
+      const li = document.createElement('li');
+      if (r.id === mp.myId) li.className = 'me';
+      const rank = document.createElement('span');
+      rank.className = 'rank';
+      rank.textContent = i + 1;
+      const dot = document.createElement('i');
+      dot.style.background = lookFor(r.color).color;
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = r.name + (r.id === mp.myId ? ' (you)' : '') + (r.left ? ' · left' : '');
+      const height = document.createElement('small');
+      height.textContent = r.height + ' m';
+      const score = document.createElement('b');
+      score.textContent = r.score;
+      li.append(rank, dot, name, height, score);
+      ui.resultsList.append(li);
+    });
+    const winner = list[0];
+    const iWon = !!winner && winner.id === mp.myId;
+    ui.resultsWinner.textContent = !winner ? '' : list.length === 1 ? 'Solo round complete!' : iWon ? '★ YOU WIN! ★' : '★ ' + winner.name + ' WINS! ★';
+    ui.resultsWinner.style.color = winner ? lookFor(winner.color).color : '';
+    const mine = list.find((r) => r.id === mp.myId);
+    ui.resultsNote.textContent = mine ? 'Your score: ' + mine.score + ' · Personal best: ' + best : '';
+    if (iWon && list.length > 1) Sound.record();
+    else Sound.stage();
+    setState('results');
   }
 
   /* ==================================================================
@@ -1421,10 +2118,11 @@
 
   function step(dt) {
     if (state === 'playing') stepPlaying(dt);
-    else if (state === 'menu') stepMenu(dt);
-    else if (state === 'gameover') {
-      updatePlatforms(dt, run.time);
-      updateHazards(dt, run.time);
+    else if (state === 'menu' || state === 'mp' || state === 'lobby') stepMenu(dt);
+    else if (state === 'gameover' || state === 'results') {
+      run.clock += dt;
+      updatePlatforms(dt, run.clock);
+      updateHazards(dt, run.clock);
       updateEffects(dt);
     }
     // 'paused' -> nothing updates
@@ -1445,6 +2143,7 @@
         accumulator -= STEP;
       }
       if (state === 'playing') updateHud(false);
+      if (mode === 'multi') netTick(dt);
     }
     render();
   }
@@ -1486,18 +2185,45 @@
     document.querySelectorAll('[data-hold]').forEach(bindTouchButton);
 
     // Losing focus / hiding the tab: pause and drop held keys, no physics jump on return.
+    // (Multiplayer matches can't pause, so there we only drop held keys.)
     window.addEventListener('blur', () => {
       clearInput();
-      if (state === 'playing' && !run.dead) togglePause();
+      if (state === 'playing' && !run.dead && mode === 'solo') togglePause();
     });
     document.addEventListener('visibilitychange', () => {
       lastTs = 0;
       accumulator = 0;
       if (document.hidden) {
         clearInput();
-        if (state === 'playing' && !run.dead) togglePause();
+        if (state === 'playing' && !run.dead && mode === 'solo') togglePause();
       }
     });
+
+    // ---- multiplayer wiring ----
+    ui.mpName.value = Store.get(STORE_NAME, '');
+    ui.mpCode.addEventListener('input', () => {
+      ui.mpCode.value = Net.normalizeCode(ui.mpCode.value);
+    });
+    Net.on('message', (from, msg) => {
+      if (!msg || typeof msg.t !== 'string') return;
+      if (Net.role === 'host') onHostMessage(from, msg);
+      else if (Net.role === 'client') onClientMessage(msg);
+    });
+    Net.on('peerLeave', (id) => { if (Net.role === 'host') onHostPeerLeave(id); });
+    Net.on('closed', (reason) => {
+      if (mode !== 'multi') return;
+      leaveMultiplayer();
+      openMultiplayer();
+      mpStatus(reason, true);
+    });
+    Net.on('error', (text) => showToast(text));
+
+    // Invite links (?join=CODE) open the join screen with the code filled in.
+    const joinParam = new URLSearchParams(location.search).get('join');
+    if (joinParam) {
+      ui.mpCode.value = Net.normalizeCode(joinParam);
+      openMultiplayer();
+    }
 
     requestAnimationFrame(frame);
   }
@@ -1511,6 +2237,9 @@
     get run() { return run; },
     get lavaY() { return lavaY; },
     get camY() { return camY; },
+    get mode() { return mode; },
+    remotes,
+    mp,
     input,
     /** Simulate `sec` seconds instantly (handy for automated tests). */
     advance(sec) {
@@ -1519,6 +2248,7 @@
         step(STEP);
       }
       if (state === 'playing') updateHud(false);
+      if (mode === 'multi') netTick(sec);
       render();
     },
   };

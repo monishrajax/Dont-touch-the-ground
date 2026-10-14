@@ -4,7 +4,7 @@
 
 A neon arcade platformer for the browser. Climb floating platforms, dodge saws, orbs and spikes, and stay above the rising lava floor for as long as you can.
 
-It's built with plain HTML5 Canvas, CSS and JavaScript. There are no dependencies, no build step, no server and no internet connection needed.
+It's built with plain HTML5 Canvas, CSS and JavaScript. There are no dependencies and no build step. Single player needs no internet connection. **Multiplayer** lets friends race up the same tower by sharing a 5-character game code (needs internet).
 
 ## Run it
 
@@ -23,9 +23,27 @@ npx serve .
 Dont touch the ground/
 ├── index.html   # page structure: canvas, HUD, menu / pause / game-over overlays, touch buttons
 ├── style.css    # neon UI styling, overlay transitions, responsive + touch layout
-├── game.js      # all game logic and Canvas rendering
+├── game.js      # all game logic and Canvas rendering (incl. multiplayer lobby & match logic)
+├── net.js       # multiplayer networking (WebRTC via PeerJS, loaded on demand)
 └── README.md
 ```
+
+## Multiplayer
+
+1. **Host:** open the game → **MULTIPLAYER** → type your name → **HOST GAME**. You get a 5-character code like `LBX7Q`.
+2. **Friends:** open the game → **MULTIPLAYER** → type the code → **JOIN**. Up to 6 players can join.
+3. The host presses **START MATCH**. After a 3-2-1 countdown everyone climbs the **same tower** (it's built from a shared random seed).
+4. Other players appear as see-through ghosts with name tags. Arrows at the screen edges point to players above or below you, and a live leaderboard sits under your score.
+5. When you fall, you watch whoever is still climbing. Once everyone has fallen, the results screen ranks everyone by score. The host can start another round or go back to the lobby.
+
+Rules and notes:
+
+- Each player has their own lava and their own vanishing/crumbling platforms, so nobody can break a platform under someone else.
+- A match can't be paused. `P` / `Esc` opens a "Leave match?" panel while the game keeps running.
+- If a player leaves, they're marked "left" in the results. If the host leaves, everyone goes back to the multiplayer screen.
+- **Everyone needs the game files.** The easiest way is to put the game online, for example on GitHub Pages (Settings → Pages → deploy from `main`). When the game is served over `https`, **COPY CODE** copies a ready-made invite link (`...?join=CODE`).
+
+How it works: players connect directly to each other with WebRTC data channels, using the [PeerJS](https://peerjs.com) library. PeerJS's free public server only introduces players to each other; the host's game code is part of their PeerJS id. Everyone connects to the host, and the host relays position updates (15 per second) to the others. Each player runs their own physics, so controls feel instant even with lag.
 
 ## Controls
 
@@ -106,3 +124,7 @@ The file is split into numbered sections. Key functions:
 - Some mobile browsers (iOS Safari) only start audio after the first tap. That's a browser rule, and the game works normally without sound.
 - When opened from `file://`, Safari keeps a separate saved best score for each file location.
 - There are no online leaderboards, by design (no backend).
+- Multiplayer depends on PeerJS's free public server to connect players. If it's down, hosting or joining fails with a clear message, and single player is unaffected.
+- On some very strict networks (some corporate or school Wi-Fi), direct WebRTC connections can fail. Switching networks (e.g. a phone hotspot) usually fixes it.
+- Ghost positions are smoothed, so other players appear about 0.1 s behind where they really are. Moving platforms can look slightly out of sync for ghosts. This is cosmetic only; each player's own game is exact.
+- If the host's tab is hidden, their own climber freezes, but relaying still works for everyone else.

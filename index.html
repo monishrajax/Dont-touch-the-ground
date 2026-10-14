@@ -20,6 +20,8 @@
           <div class="hud-label">SCORE</div>
           <div id="hudScore" class="hud-score">0</div>
           <div class="hud-sub">BEST <b id="hudBest">0</b></div>
+          <!-- live multiplayer leaderboard (only shown in multiplayer) -->
+          <ol id="mpBoard" class="mp-board"></ol>
         </div>
         <div class="hud-right">
           <div class="hud-btns">
@@ -42,6 +44,7 @@
         </div>
 
         <button class="btn primary" data-action="play">&#9654; PLAY</button>
+        <button class="btn" data-action="mp">&#9673; MULTIPLAYER</button>
         <div class="best-line">BEST SCORE <b id="menuBest">0</b></div>
 
         <div class="panel" id="instructions">
@@ -87,6 +90,62 @@
         <button class="btn primary" data-action="again">&#8635; PLAY AGAIN</button>
         <button class="btn ghost" data-action="menu">MAIN MENU</button>
       </section>
+
+      <!-- ============ MULTIPLAYER: HOST OR JOIN ============ -->
+      <section id="mp" class="overlay dim" aria-label="Multiplayer">
+        <h2 class="over-title">MULTIPLAYER</h2>
+        <p class="muted">Race your friends up the same tower.<br>Highest score when everyone has fallen wins.</p>
+        <label class="field">
+          <span>YOUR NAME</span>
+          <input id="mpName" type="text" maxlength="12" autocomplete="off" spellcheck="false" placeholder="Player">
+        </label>
+        <button class="btn primary" data-action="mpHost">HOST GAME</button>
+        <div class="divider"><span>OR JOIN A FRIEND</span></div>
+        <div class="join-row">
+          <input id="mpCode" class="code-input" type="text" maxlength="5" placeholder="CODE" autocomplete="off" spellcheck="false" autocapitalize="characters" aria-label="Game code">
+          <button class="btn" data-action="mpJoin">JOIN</button>
+        </div>
+        <p id="mpStatus" class="mp-status" role="status"></p>
+        <button class="btn ghost small" data-action="menu">BACK</button>
+      </section>
+
+      <!-- ============ MULTIPLAYER LOBBY ============ -->
+      <section id="lobby" class="overlay dim" aria-label="Multiplayer lobby">
+        <h2 class="over-title">LOBBY</h2>
+        <div class="code-box">
+          <span>GAME CODE</span>
+          <b id="lobbyCode" class="code">-----</b>
+          <button class="btn ghost small" data-action="mpCopy">COPY CODE</button>
+        </div>
+        <p class="muted">Friends open the game, choose <b>Multiplayer</b> and enter this code.</p>
+        <ul id="lobbyPlayers" class="player-list"></ul>
+        <p id="lobbyStatus" class="muted"></p>
+        <button class="btn primary host-only" data-action="mpStart" id="mpStartBtn">&#9654; START MATCH</button>
+        <button class="btn ghost" data-action="mpLeave">LEAVE</button>
+      </section>
+
+      <!-- ============ MULTIPLAYER RESULTS ============ -->
+      <section id="results" class="overlay dim" aria-label="Match results">
+        <h2 class="over-title">MATCH OVER</h2>
+        <p id="resultsWinner" class="winner"></p>
+        <ol id="resultsList" class="results-list"></ol>
+        <p id="resultsNote" class="muted"></p>
+        <button class="btn primary host-only" data-action="mpAgain">&#8635; PLAY AGAIN</button>
+        <button class="btn host-only" data-action="mpLobby">BACK TO LOBBY</button>
+        <p class="muted client-only">Waiting for the host to start the next round&hellip;</p>
+        <button class="btn ghost" data-action="mpLeave">LEAVE</button>
+      </section>
+
+      <!-- In multiplayer the match can't be paused, so P/Esc opens this instead -->
+      <section id="leave" class="overlay dim" aria-label="Leave match">
+        <h2 class="over-title">LEAVE MATCH?</h2>
+        <p class="muted">The match keeps running while this is open.</p>
+        <button class="btn primary" data-action="leaveCancel">KEEP PLAYING</button>
+        <button class="btn ghost" data-action="leaveConfirm">LEAVE MATCH</button>
+      </section>
+
+      <!-- Shown after you fall in multiplayer while others are still climbing -->
+      <div id="spectate" class="spectate" role="status"><b>YOU'RE OUT!</b> <span id="specText"></span></div>
     </div>
 
     <!-- ============ TOUCH CONTROLS (touch devices, while playing) ============
@@ -103,6 +162,7 @@
   </main>
 
   <noscript><p style="color:#fff;text-align:center;margin-top:20vh">This game needs JavaScript enabled.</p></noscript>
+  <script src="net.js"></script>
   <script src="game.js"></script>
 </body>
 </html>

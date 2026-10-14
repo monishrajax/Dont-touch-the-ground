@@ -61,7 +61,9 @@ b { font-weight: 800; }
   pointer-events: none;
   opacity: 0; transition: opacity 0.35s;
 }
-#stage:not([data-state="menu"]) #hud { opacity: 1; }
+#stage[data-state="playing"] #hud,
+#stage[data-state="paused"] #hud,
+#stage[data-state="gameover"] #hud { opacity: 1; }
 .hud-label { font-size: 0.65em; letter-spacing: 0.25em; color: var(--muted); }
 .hud-score {
   font-size: 2.6em; font-weight: 900; line-height: 1;
@@ -207,6 +209,77 @@ kbd {
 .stat span { display: block; font-size: 0.6em; letter-spacing: 0.22em; color: var(--muted); }
 .stat b { font-size: 1.5em; font-variant-numeric: tabular-nums; }
 .stat.big b { font-size: 2.6em; color: var(--cyan); text-shadow: 0 0 16px var(--cyan); }
+
+/* ---------------- Multiplayer ---------------- */
+#stage[data-state="mp"] #mp,
+#stage[data-state="lobby"] #lobby,
+#stage[data-state="results"] #results,
+#stage.leave-open[data-state="playing"] #leave { opacity: 1; visibility: visible; transform: none; }
+#leave { background: rgba(8, 11, 22, 0.55); }
+
+.host-only, .client-only { display: none; }
+#stage.is-host .host-only { display: inline-block; }
+#stage:not(.is-host) .client-only { display: block; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; animation: none; transform: none; }
+
+.field { display: flex; flex-direction: column; gap: 0.3em; width: 100%; max-width: 15em; text-align: left; }
+.field span { font-size: 0.6em; letter-spacing: 0.25em; color: var(--muted); }
+#mp input {
+  width: 100%; padding: 0.6em 0.9em;
+  font: inherit; font-weight: 700; color: var(--text);
+  background: rgba(8, 11, 22, 0.75);
+  border: 1.5px solid rgba(0, 229, 255, 0.45); border-radius: 0.7em;
+  outline: none; user-select: text; -webkit-user-select: text;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+#mp input:focus { border-color: var(--cyan); box-shadow: 0 0 14px rgba(0, 229, 255, 0.4); }
+#mp input::placeholder { color: rgba(139, 155, 184, 0.6); }
+.divider { display: flex; align-items: center; gap: 0.8em; width: 100%; max-width: 15em; color: var(--muted); font-size: 0.6em; letter-spacing: 0.22em; }
+.divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: rgba(139, 155, 184, 0.3); }
+.join-row { display: flex; gap: 0.5em; width: 100%; max-width: 15em; }
+.join-row input { flex: 1; min-width: 0; }
+.join-row .btn { flex: none; min-width: 0; padding: 0.6em 1.4em; }
+#mp input.code-input { text-transform: uppercase; letter-spacing: 0.35em; text-align: center; font-size: 1.1em; }
+.mp-status { min-height: 1.3em; font-size: 0.8em; color: var(--cyan); max-width: 18em; }
+.mp-status.error { color: var(--red); }
+
+.code-box { display: flex; flex-direction: column; align-items: center; gap: 0.3em; padding: 0.7em 1.4em; border-radius: 0.9em; background: var(--panel); border: 1px solid rgba(0, 229, 255, 0.35); }
+.code-box > span { font-size: 0.6em; letter-spacing: 0.3em; color: var(--muted); }
+.code { font-size: 2.2em; letter-spacing: 0.3em; padding-left: 0.3em; color: var(--green); text-shadow: 0 0 16px rgba(57, 255, 136, 0.7); font-family: ui-monospace, Menlo, Consolas, monospace; }
+
+.player-list { list-style: none; display: grid; gap: 0.35em; width: 100%; max-width: 15em; }
+.player-list li { display: flex; align-items: center; gap: 0.6em; padding: 0.45em 0.8em; border-radius: 0.6em; background: var(--panel); text-align: left; }
+.player-list span { flex: 1; font-weight: 700; }
+.dot, .mp-board i, .results-list i { display: inline-block; width: 0.7em; height: 0.7em; border-radius: 50%; flex: none; box-shadow: 0 0 8px currentColor; }
+.tag { font-size: 0.6em; letter-spacing: 0.15em; padding: 0.15em 0.5em; border-radius: 999px; border: 1px solid var(--purple); color: var(--purple); }
+
+/* live leaderboard in the HUD */
+.mp-board { display: none; list-style: none; margin-top: 0.6em; font-size: 0.68em; min-width: 9.5em; }
+#stage.multi .mp-board { display: grid; gap: 0.2em; }
+.mp-board li { display: flex; align-items: center; gap: 0.45em; padding: 0.2em 0.5em; border-radius: 0.4em; background: rgba(8, 11, 22, 0.55); }
+.mp-board li span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 6.5em; }
+.mp-board li.me { outline: 1px solid rgba(255, 255, 255, 0.35); }
+.mp-board li.out { opacity: 0.4; text-decoration: line-through; }
+
+.spectate {
+  position: absolute; left: 50%; bottom: 8%; transform: translateX(-50%);
+  padding: 0.55em 1.2em; border-radius: 999px; white-space: nowrap;
+  font-size: 0.85em; color: var(--muted);
+  background: rgba(8, 11, 22, 0.8); border: 1px solid var(--red); box-shadow: 0 0 18px rgba(255, 77, 77, 0.4);
+  opacity: 0; pointer-events: none; transition: opacity 0.3s;
+}
+.spectate b { color: var(--red); letter-spacing: 0.1em; margin-right: 0.4em; }
+#stage.spectating[data-state="playing"] .spectate { opacity: 1; }
+
+.winner { font-size: 1.4em; font-weight: 900; letter-spacing: 0.08em; text-shadow: 0 0 18px currentColor; }
+.results-list { list-style: none; display: grid; gap: 0.35em; width: 100%; max-width: 18em; }
+.results-list li { display: flex; align-items: center; gap: 0.6em; padding: 0.5em 0.8em; border-radius: 0.6em; background: var(--panel); text-align: left; }
+.results-list li.me { outline: 1.5px solid var(--cyan); }
+.results-list .rank { width: 1.2em; font-weight: 900; color: var(--muted); }
+.results-list li:first-child .rank { color: var(--amber, #FFB02E); }
+.results-list .name { flex: 1; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.results-list small { color: var(--muted); font-size: 0.75em; }
+.results-list b { min-width: 2.5em; text-align: right; font-size: 1.1em; font-variant-numeric: tabular-nums; }
 
 /* ---------------- Touch controls ---------------- */
 .touch {
