@@ -106,7 +106,7 @@ b { font-weight: 800; }
   display: none; align-self: flex-end;
   margin: -0.9em 0.9em 0 0; padding: 0.5em 0.65em 0.55em;
   min-width: 10.5em; max-width: 13em;
-  background: rgba(8, 11, 22, 0.78);
+  background: rgba(8, 11, 22, 0.9);
   border: 1px solid rgba(0, 229, 255, 0.3); border-radius: 0.8em;
   box-shadow: 0 0 16px rgba(0, 229, 255, 0.12);
 }

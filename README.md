@@ -33,7 +33,7 @@ Dont touch the ground/
 1. **Host:** open the game → **MULTIPLAYER** → type your name → **HOST GAME**. You get a 5-character code like `LBX7Q`.
 2. **Friends:** open the game → **MULTIPLAYER** → type the code → **JOIN**. Up to 6 players can join.
 3. The host presses **START MATCH**. After a 3-2-1 countdown everyone climbs the **same tower** (it's built from a shared random seed).
-4. Other players appear as see-through ghosts with name tags. Arrows at the screen edges point to players above or below you, and a live leaderboard sits under your score.
+4. Other players appear as see-through ghosts with name tags. Arrows at the screen edges point to players above or below you, and a live scoreboard in the top-right corner shows everyone's score.
 5. When you fall, you watch whoever is still climbing. Once everyone has fallen, the results screen ranks everyone by score. The host can start another round or go back to the lobby.
 
 Rules and notes:
