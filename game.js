@@ -1075,7 +1075,7 @@
     }
     if (player && player.visible) drawPlayerWrapped(c, player, myLook, 1);
     drawParticles(c);
-    drawLava(c);
+    drawFloor(c);
     c.restore();
 
     drawDangerVignette(c);
@@ -1171,45 +1171,98 @@
     c.restore();
   }
 
+  /** Prison wall: concrete bricks, barred windows, sweeping searchlights and a
+   *  mugshot-style height chart. Layers scroll at different speeds (parallax). */
   function drawBackground(c) {
-    const g = c.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, '#0B0F24');
-    g.addColorStop(1, COLORS.bg);
-    c.fillStyle = g;
+    c.fillStyle = COLORS.bg;
+    c.fillRect(0, 0, W, H);
+    const shade = c.createLinearGradient(0, 0, 0, H);
+    shade.addColorStop(0, 'rgba(0,0,0,0.45)');
+    shade.addColorStop(1, 'rgba(40,44,52,0.25)');
+    c.fillStyle = shade;
     c.fillRect(0, 0, W, H);
 
-    // soft nebula blobs (parallax)
-    const off = (-camY * 0.05) % (H * 2);
-    c.globalAlpha = 0.5;
-    const n1 = c.createRadialGradient(110, (180 + off) % (H + 300) - 150, 10, 110, (180 + off) % (H + 300) - 150, 220);
-    n1.addColorStop(0, 'rgba(168,85,247,0.22)');
-    n1.addColorStop(1, 'rgba(168,85,247,0)');
-    c.fillStyle = n1;
-    c.fillRect(0, 0, W, H);
-    const n2 = c.createRadialGradient(390, (520 + off) % (H + 300) - 150, 10, 390, (520 + off) % (H + 300) - 150, 200);
-    n2.addColorStop(0, 'rgba(0,229,255,0.16)');
-    n2.addColorStop(1, 'rgba(0,229,255,0)');
-    c.fillStyle = n2;
-    c.fillRect(0, 0, W, H);
-    c.globalAlpha = 1;
+    // brick wall (parallax 0.35)
+    const par = camY * 0.35;
+    const BH = 22, BW = 48;
+    c.strokeStyle = 'rgba(255,255,255,0.045)';
+    c.lineWidth = 1;
+    c.beginPath();
+    const firstRow = Math.floor(par / BH);
+    for (let r = firstRow; r * BH - par < H; r++) {
+      const y = r * BH - par;
+      c.moveTo(0, y);
+      c.lineTo(W, y);
+      const shift = (r & 1) ? BW / 2 : 0;
+      for (let x = -shift; x < W; x += BW) {
+        c.moveTo(x, y);
+        c.lineTo(x, y + BH);
+      }
+    }
+    c.stroke();
 
-    // twinkling parallax stars
-    c.fillStyle = '#ffffff';
+    // barred windows with moonlight (same parallax as the bricks)
+    const WIN_GAP = 520;
+    for (let k = Math.floor((par - 120) / WIN_GAP); k * WIN_GAP - par < H; k++) {
+      const wy = k * WIN_GAP + 150 - par;
+      const wx = (k & 1) ? 312 : 70;
+      c.fillStyle = '#0B0C0F';
+      c.fillRect(wx - 6, wy - 6, 112, 82);
+      const moon = c.createLinearGradient(0, wy, 0, wy + 70);
+      moon.addColorStop(0, '#2A3A55');
+      moon.addColorStop(1, '#17202F');
+      c.fillStyle = moon;
+      c.fillRect(wx, wy, 100, 70);
+      c.fillStyle = 'rgba(220,230,255,0.55)';
+      c.beginPath();
+      c.arc(wx + 72, wy + 20, 7, 0, Math.PI * 2);
+      c.fill();
+      c.fillStyle = '#3B4048';
+      for (let b = 1; b < 6; b++) c.fillRect(wx + b * 16.6 - 2, wy, 4, 70);
+      c.fillRect(wx, wy + 32, 100, 4);
+    }
+
+    // two searchlights sweeping across the wall
+    for (let i = 0; i < 2; i++) {
+      const sx = i ? W + 30 : -30;
+      const ang = Math.PI / 2 + (i ? 0.55 : -0.55) + Math.sin(visualTime * 0.45 + i * 2.1) * 0.42;
+      const len = H * 1.3, spread = 0.16;
+      const beam = c.createRadialGradient(sx, -40, 10, sx, -40, len);
+      beam.addColorStop(0, 'rgba(255,226,140,0.16)');
+      beam.addColorStop(1, 'rgba(255,226,140,0)');
+      c.fillStyle = beam;
+      c.beginPath();
+      c.moveTo(sx, -40);
+      c.lineTo(sx + Math.cos(ang - spread) * len, -40 + Math.sin(ang - spread) * len);
+      c.lineTo(sx + Math.cos(ang + spread) * len, -40 + Math.sin(ang + spread) * len);
+      c.closePath();
+      c.fill();
+    }
+
+    // mugshot height chart on the left wall (moves with the world, 1 tick = 10 m)
+    c.font = 'bold 9px "Trebuchet MS", sans-serif';
+    c.textAlign = 'left';
+    c.strokeStyle = 'rgba(241,241,238,0.22)';
+    c.fillStyle = 'rgba(241,241,238,0.32)';
+    c.beginPath();
+    const topM = Math.ceil((START_Y - (camY + H)) / 100) * 10;
+    for (let m = Math.max(0, topM); START_Y - m * 10 - camY > -10; m += 10) {
+      const y = START_Y - m * 10 - camY;
+      const major = m % 50 === 0;
+      c.moveTo(0, y);
+      c.lineTo(major ? 22 : 12, y);
+      if (major) c.fillText(m + 'm', 4, y - 3);
+    }
+    c.stroke();
+
+    // drifting dust in the light
+    c.fillStyle = '#D6D3CC';
     for (const s of stars) {
-      const y = (((s.y * H - camY * s.z * 0.25) % H) + H) % H;
-      c.globalAlpha = (0.25 + 0.55 * s.z) * (0.6 + 0.4 * Math.sin(visualTime * 2 + s.tw));
+      const y = (((s.y * H - camY * s.z * 0.25 + visualTime * 6 * s.z) % H) + H) % H;
+      c.globalAlpha = (0.05 + 0.15 * s.z) * (0.6 + 0.4 * Math.sin(visualTime + s.tw));
       c.fillRect(s.x, y, s.s, s.s);
     }
     c.globalAlpha = 1;
-
-    // faint perspective grid near the bottom for depth
-    c.strokeStyle = 'rgba(168,85,247,0.07)';
-    c.lineWidth = 1;
-    const gridOff = (-camY * 0.3) % 40;
-    c.beginPath();
-    for (let y = gridOff; y < H; y += 40) { c.moveTo(0, y); c.lineTo(W, y); }
-    for (let x = 0; x <= W; x += 40) { c.moveTo(x, 0); c.lineTo(x, H); }
-    c.stroke();
   }
 
   function drawPlatform(c, p) {
@@ -1217,87 +1270,118 @@
     let x = p.x, y = p.y, alpha = 1;
     if (p.state === 'crumbling') { x += rand(-1.6, 1.6); y += rand(-1, 1); }
     if (p.state === 'vanishing') alpha = p.timer < 0.4 ? (Math.floor(p.timer * 22) % 2 ? 0.25 : 0.85) : 0.9;
-    if (p.type === 'vanish' && p.state === 'idle') alpha = 0.75 + 0.2 * Math.sin(visualTime * 4 + p.x);
 
     c.save();
     c.globalAlpha = alpha;
 
-    // bouncy pads have a spring underneath
+    // bunk mattresses sit on a spring
     if (p.type === 'bouncy') {
       const cx = x + p.w / 2;
       const ext = 8 + p.bounceAnim * 8;
-      c.strokeStyle = COLORS.green;
+      c.strokeStyle = '#9AA3AE';
       c.lineWidth = 2;
       c.beginPath();
-      for (let i = 0; i <= 6; i++) {
-        c.lineTo(cx + (i % 2 ? 8 : -8), y + p.h + (ext * i) / 6);
-      }
+      for (let i = 0; i <= 6; i++) c.lineTo(cx + (i % 2 ? 8 : -8), y + p.h + (ext * i) / 6);
       c.stroke();
       y -= p.bounceAnim * 4;
     }
 
-    c.shadowColor = st.color;
-    c.shadowBlur = 12 + (p.glow > 0 ? p.glow * 70 : 0);
-    roundRect(c, x, y, p.w, p.h, 6);
-    c.fillStyle = st.fill;
+    // body + outline (a short flash of light when landed on)
+    if (p.glow > 0) {
+      c.shadowColor = COLORS.yellow;
+      c.shadowBlur = p.glow * 60;
+    }
+    roundRect(c, x, y, p.w, p.h, p.type === 'bouncy' ? 6 : 3);
+    c.fillStyle = st.body;
     c.fill();
-    c.lineWidth = 2;
-    c.strokeStyle = st.color;
-    if (p.type === 'vanish') c.setLineDash([7, 5]);
+    c.shadowBlur = 0;
+    c.lineWidth = 1.5;
+    c.strokeStyle = st.edge;
+    if (p.type === 'vanish') c.setLineDash([6, 4]);
     c.stroke();
     c.setLineDash([]);
-    c.shadowBlur = 0;
 
-    // top highlight
-    c.fillStyle = 'rgba(255,255,255,0.45)';
-    c.fillRect(x + 7, y + 2.5, p.w - 14, 1.5);
-
-    // type decorations
+    // top edge highlight
     c.fillStyle = st.color;
-    c.strokeStyle = st.color;
-    if (p.type === 'moving') {
-      const my = y + p.h / 2;
-      c.beginPath();
-      c.moveTo(x + 6, my); c.lineTo(x + 12, my - 4); c.lineTo(x + 12, my + 4);
-      c.moveTo(x + p.w - 6, my); c.lineTo(x + p.w - 12, my - 4); c.lineTo(x + p.w - 12, my + 4);
-      c.fill();
+    c.fillRect(x + 2, y + 1.5, p.w - 4, 2);
+
+    c.save();
+    roundRect(c, x, y, p.w, p.h, 3);
+    c.clip();
+    if (p.type === 'normal' || p.type === 'moving') {
+      // rivets
+      c.fillStyle = st.color;
+      for (let rx = x + 8; rx < x + p.w - 4; rx += 16) {
+        c.beginPath();
+        c.arc(rx, y + p.h / 2 + 2, 1.4, 0, Math.PI * 2);
+        c.fill();
+      }
     } else if (p.type === 'bouncy') {
-      const cx = x + p.w / 2;
-      c.lineWidth = 2;
+      // mattress ticking stripes
+      c.fillStyle = 'rgba(70,90,140,0.35)';
+      for (let sx = x + 5; sx < x + p.w; sx += 9) c.fillRect(sx, y + 4, 3, p.h - 5);
+    } else if (p.type === 'vanish') {
+      // chain-link mesh
+      c.strokeStyle = 'rgba(201,212,224,0.45)';
+      c.lineWidth = 1;
       c.beginPath();
-      c.moveTo(cx - 6, y + 10); c.lineTo(cx, y + 5); c.lineTo(cx + 6, y + 10);
-      c.stroke();
-    } else if (p.type === 'crumble') {
-      c.lineWidth = 1.2;
-      c.globalAlpha = alpha * 0.8;
-      c.beginPath();
-      for (let k = 1; k < 4; k++) {
-        const kx = x + (p.w * k) / 4;
-        c.moveTo(kx - 3, y + 2); c.lineTo(kx + 2, y + 7); c.lineTo(kx - 1, y + p.h - 2);
+      for (let mx = x - p.h; mx < x + p.w; mx += 7) {
+        c.moveTo(mx, y); c.lineTo(mx + p.h, y + p.h);
+        c.moveTo(mx + p.h, y); c.lineTo(mx, y + p.h);
       }
       c.stroke();
+    } else if (p.type === 'crumble') {
+      // bricks + cracks
+      c.strokeStyle = 'rgba(30,12,6,0.7)';
+      c.lineWidth = 1;
+      c.beginPath();
+      c.moveTo(x, y + p.h / 2 + 1); c.lineTo(x + p.w, y + p.h / 2 + 1);
+      for (let bx = x + 14; bx < x + p.w; bx += 14) { c.moveTo(bx, y + 3); c.lineTo(bx, y + p.h / 2 + 1); }
+      for (let bx = x + 7; bx < x + p.w; bx += 14) { c.moveTo(bx, y + p.h / 2 + 1); c.lineTo(bx, y + p.h); }
+      c.stroke();
+    }
+    c.restore();
+
+    // arrows on moving beams
+    if (p.type === 'moving') {
+      const my = y + p.h / 2 + 1;
+      c.fillStyle = st.color;
+      c.beginPath();
+      c.moveTo(x + 5, my); c.lineTo(x + 11, my - 4); c.lineTo(x + 11, my + 4);
+      c.moveTo(x + p.w - 5, my); c.lineTo(x + p.w - 11, my - 4); c.lineTo(x + p.w - 11, my + 4);
+      c.fill();
     }
 
-    if (p.spikes) drawSpikes(c, p, x, y);
+    if (p.spikes) drawBarbedWire(c, p, x, y);
     c.restore();
   }
 
-  function drawSpikes(c, p, x, y) {
+  /** Stationary hazard: a coil of barbed wire on one end of a platform.
+   *  (Its hitbox is the same 13 px tall strip the old spikes used.) */
+  function drawBarbedWire(c, p, x, y) {
     const sx = x + (p.spikes.side === 0 ? 0 : p.w - p.spikes.w);
-    const n = 3;
-    const sw = p.spikes.w / n;
-    const pulse = 0.6 + 0.4 * Math.sin(visualTime * 6);
+    const sw = p.spikes.w;
+    const pulse = 0.5 + 0.5 * Math.sin(visualTime * 6);
     c.save();
     c.shadowColor = COLORS.red;
-    c.shadowBlur = 10 + pulse * 8;
-    c.fillStyle = COLORS.red;
+    c.shadowBlur = 6 + pulse * 8;
+    c.strokeStyle = '#D9DEE5';
+    c.lineWidth = 1.4;
+    // coil loops
     c.beginPath();
-    for (let i = 0; i < n; i++) {
-      c.moveTo(sx + i * sw + 1, y);
-      c.lineTo(sx + i * sw + sw / 2, y - 13);
-      c.lineTo(sx + (i + 1) * sw - 1, y);
+    for (let i = 0; i <= 3; i++) c.ellipse(sx + 4 + i * ((sw - 8) / 3), y - 6, 5, 6, 0, 0, Math.PI * 2);
+    c.stroke();
+    // barbs
+    c.shadowBlur = 0;
+    c.strokeStyle = COLORS.red;
+    c.lineWidth = 1.6;
+    c.beginPath();
+    for (let i = 0; i < 4; i++) {
+      const bx = sx + 3 + i * ((sw - 6) / 3);
+      c.moveTo(bx - 3, y - 13); c.lineTo(bx + 3, y - 7);
+      c.moveTo(bx + 3, y - 13); c.lineTo(bx - 3, y - 7);
     }
-    c.fill();
+    c.stroke();
     c.restore();
   }
 
@@ -1305,10 +1389,11 @@
     c.save();
     c.translate(h.x, h.y);
     c.shadowColor = COLORS.red;
-    c.shadowBlur = 16;
+    c.shadowBlur = 14;
     if (h.kind === 'saw') {
+      // spinning steel sawblade with a red hub
       c.rotate(h.ang);
-      c.fillStyle = COLORS.red;
+      c.fillStyle = '#C8CED6';
       c.beginPath();
       const teeth = 10;
       for (let i = 0; i < teeth * 2; i++) {
@@ -1319,19 +1404,20 @@
       c.closePath();
       c.fill();
       c.shadowBlur = 0;
-      c.fillStyle = '#2a0b12';
-      c.beginPath(); c.arc(0, 0, h.r - 7, 0, Math.PI * 2); c.fill();
-      c.fillStyle = COLORS.amber;
-      c.beginPath(); c.arc(0, 0, 3, 0, Math.PI * 2); c.fill();
+      c.strokeStyle = '#6B7380';
+      c.lineWidth = 1;
+      c.beginPath(); c.arc(0, 0, h.r - 7, 0, Math.PI * 2); c.stroke();
+      c.fillStyle = COLORS.red;
+      c.beginPath(); c.arc(0, 0, 4.5, 0, Math.PI * 2); c.fill();
     } else {
+      // crackling shock orb
       const pulse = 0.5 + 0.5 * Math.sin(visualTime * 8);
       const g = c.createRadialGradient(0, 0, 2, 0, 0, h.r + 4);
       g.addColorStop(0, '#ffffff');
-      g.addColorStop(0.35, COLORS.amber);
-      g.addColorStop(1, 'rgba(255,77,77,0.2)');
+      g.addColorStop(0.35, COLORS.yellow);
+      g.addColorStop(1, 'rgba(255,59,59,0.25)');
       c.fillStyle = g;
       c.beginPath(); c.arc(0, 0, h.r + pulse * 2, 0, Math.PI * 2); c.fill();
-      // crackling electric ring
       c.rotate(h.ang);
       c.strokeStyle = COLORS.red;
       c.lineWidth = 1.5;
@@ -1346,16 +1432,33 @@
     c.restore();
   }
 
-  /** The hero: a little neon robot with a visor, legs and squash/stretch.
-   *  `p` is the local player or a remote ghost; `look` picks its colours. */
+  /** The prisoner: striped jumpsuit, cap, and a ball & chain on one ankle.
+   *  `p` is the local player or a remote ghost; `look` picks the jumpsuit colours. */
   function drawPlayer(c, p, x, y, look, alpha) {
     const w = p.w, h = p.h;
     const grounded = !!p.ground;
     c.save();
     c.globalAlpha = alpha;
-    c.translate(x + w / 2, y + h);
 
-    // squash & stretch
+    // ---- ball & chain (trails behind; dangles while airborne) ----
+    const footX = x + w / 2 - p.face * 5;
+    const footY = y + h - 2;
+    const ballX = footX - p.face * 14 - clamp(p.vx / 45, -6, 6);
+    const ballY = grounded ? y + h - 5 : y + h + 4 - clamp(p.vy / 150, -6, 6);
+    c.fillStyle = '#8C9199';
+    for (let i = 1; i <= 4; i++) {
+      const t = i / 5;
+      c.beginPath();
+      c.arc(lerp(footX, ballX, t), lerp(footY, ballY, t) + Math.sin(t * Math.PI) * 2, 1.3, 0, Math.PI * 2);
+      c.fill();
+    }
+    c.fillStyle = '#2A2D33';
+    c.beginPath(); c.arc(ballX, ballY, 5, 0, Math.PI * 2); c.fill();
+    c.fillStyle = 'rgba(255,255,255,0.35)';
+    c.beginPath(); c.arc(ballX - 1.5, ballY - 1.5, 1.6, 0, Math.PI * 2); c.fill();
+
+    // ---- body (squash & stretch around the feet) ----
+    c.translate(x + w / 2, y + h);
     let sx = 1, sy = 1;
     if (!grounded) {
       const st = clamp(Math.abs(p.vy) / 1700, 0, 0.2);
@@ -1369,48 +1472,75 @@
     if (falling) c.rotate(Math.sin(visualTime * 20) * 0.1);   // flailing while falling
     else if (!grounded) c.rotate(clamp(p.vx / 2000, -0.12, 0.12));
 
-    // legs
     const moving = Math.abs(p.vx) > 20;
     const swing = grounded && moving ? Math.sin(p.runPhase) * 4 : 0;
     const tuck = grounded ? 0 : p.vy < 0 ? 4 : -1;
-    c.fillStyle = look.leg;
-    c.fillRect(-9, -9 - Math.max(0, swing) - tuck, 7, 9);
-    c.fillRect(2, -9 - Math.max(0, -swing) - tuck, 7, 9);
-
-    // body
     const bob = grounded && moving ? Math.abs(Math.sin(p.runPhase)) * 1.5 : 0;
-    const by = -h - bob;
-    c.shadowColor = look.color;
-    c.shadowBlur = 16;
-    const g = c.createLinearGradient(0, by, 0, by + h - 8);
-    g.addColorStop(0, look.top);
-    g.addColorStop(1, look.bottom);
-    c.fillStyle = g;
-    roundRect(c, -w / 2, by, w, h - 8, 8);
-    c.fill();
-    c.shadowBlur = 0;
-    c.lineWidth = 1.5;
-    c.strokeStyle = 'rgba(255,255,255,0.75)';
-    c.stroke();
 
-    // antenna
-    c.strokeStyle = '#c4b5fd';
-    c.beginPath(); c.moveTo(0, by); c.lineTo(p.face * 3, by - 7); c.stroke();
-    c.fillStyle = COLORS.green;
-    c.shadowColor = COLORS.green;
-    c.shadowBlur = 8;
-    c.beginPath(); c.arc(p.face * 3, by - 8, 2.4, 0, Math.PI * 2); c.fill();
-    c.shadowBlur = 0;
+    // legs (striped trousers + boots)
+    const leg = (lx, lift) => {
+      c.fillStyle = look.suit;
+      c.fillRect(lx, -10 - lift - tuck, 7, 8);
+      c.fillStyle = look.stripe;
+      c.fillRect(lx, -7 - lift - tuck, 7, 2);
+      c.fillStyle = '#1B1D22';
+      c.fillRect(lx - 0.5, -3 - lift - tuck, 8, 3);
+    };
+    leg(-9, Math.max(0, swing));
+    leg(2, Math.max(0, -swing));
 
-    // visor + eyes (look in facing direction; wide eyes when falling)
-    c.fillStyle = '#0a1024';
-    roundRect(c, -w / 2 + 4, by + 6, w - 8, 10, 4);
+    // torso with horizontal stripes
+    const top = -h - bob;           // top of the head
+    const ty = top + 13;            // top of the torso
+    c.save();
+    roundRect(c, -w / 2 + 1, ty, w - 2, -9 - ty, 4);
+    c.clip();
+    c.fillStyle = look.suit;
+    c.fillRect(-w / 2, ty, w, -9 - ty);
+    c.fillStyle = look.stripe;
+    for (let s = ty + 2; s < -9; s += 5) c.fillRect(-w / 2, s, w, 2.4);
+    c.restore();
+
+    // arms (thrown up when in the air)
+    c.fillStyle = look.suit;
+    const armUp = grounded ? 0 : 6;
+    c.fillRect(-w / 2 - 2, ty + 2 - armUp, 3.5, 9);
+    c.fillRect(w / 2 - 1.5, ty + 2 - armUp, 3.5, 9);
+    c.fillStyle = '#E8B98A';
+    c.fillRect(-w / 2 - 2, ty + 10 - armUp, 3.5, 2.5);
+    c.fillRect(w / 2 - 1.5, ty + 10 - armUp, 3.5, 2.5);
+
+    // head
+    c.fillStyle = '#E8B98A';
+    roundRect(c, -8, top + 1, 16, 13, 5);
     c.fill();
-    c.fillStyle = falling ? COLORS.red : COLORS.green;
-    const eyeH = falling ? 5 : 3;
-    const ex = p.face * 3;
-    c.fillRect(ex - 6, by + 11 - eyeH / 2, 3, eyeH);
-    c.fillRect(ex + 3, by + 11 - eyeH / 2, 3, eyeH);
+    // stubble
+    c.fillStyle = 'rgba(60,40,30,0.25)';
+    c.fillRect(-6, top + 10, 12, 3);
+
+    // striped prison cap
+    c.fillStyle = look.suit;
+    roundRect(c, -8.5, top - 2, 17, 6, 3);
+    c.fill();
+    c.fillStyle = look.stripe;
+    c.fillRect(-8.5, top + 0.5, 17, 1.6);
+    c.fillStyle = look.suit;
+    c.fillRect(p.face > 0 ? 2 : -11, top + 2.5, 9, 2); // peak
+
+    // eyes look where you're going; wide eyes + open mouth when falling
+    const ex = p.face * 2;
+    c.fillStyle = '#1B1D22';
+    if (falling) {
+      c.beginPath();
+      c.arc(ex - 3.5, top + 7, 1.9, 0, Math.PI * 2);
+      c.arc(ex + 3.5, top + 7, 1.9, 0, Math.PI * 2);
+      c.fill();
+      c.beginPath(); c.arc(ex, top + 11.5, 1.6, 0, Math.PI * 2); c.fill();
+    } else {
+      c.fillRect(ex - 4.5, top + 6, 2, 2.6);
+      c.fillRect(ex + 2.5, top + 6, 2, 2.6);
+      c.fillRect(ex - 2, top + 11, 4, 1);
+    }
     c.restore();
   }
 
@@ -1438,57 +1568,62 @@
     c.globalAlpha = 1;
   }
 
-  function drawLava(c) {
+  /** The deadly floor: a red laser alarm grid. Its top edge (lavaY) is the
+   *  real collision line used by checkLava(). */
+  function drawFloor(c) {
     const top = lavaY;
     const bottom = camY + H + 30;
     if (top > bottom) return;
     const t = visualTime;
 
-    // glow above the surface
-    const glow = c.createLinearGradient(0, top - 90, 0, top);
-    glow.addColorStop(0, 'rgba(255,77,77,0)');
-    glow.addColorStop(1, 'rgba(255,77,77,0.28)');
+    // red warning glow above the beam
+    const glow = c.createLinearGradient(0, top - 110, 0, top);
+    glow.addColorStop(0, 'rgba(255,40,40,0)');
+    glow.addColorStop(1, 'rgba(255,40,40,0.24)');
     c.fillStyle = glow;
-    c.fillRect(0, top - 90, W, 90);
+    c.fillRect(0, top - 110, W, 110);
 
-    // wavy body
+    // dark floor with a scrolling laser grid
+    c.fillStyle = '#1C0B0E';
+    c.fillRect(0, top, W, bottom - top);
+    c.strokeStyle = 'rgba(255,59,59,0.28)';
+    c.lineWidth = 1;
     c.beginPath();
-    c.moveTo(0, bottom);
-    for (let x = 0; x <= W; x += 12) {
-      c.lineTo(x, top + Math.sin(x * 0.03 + t * 2.2) * 3 + Math.sin(x * 0.075 - t * 3.1) * 2);
-    }
-    c.lineTo(W, bottom);
-    c.closePath();
-    const g = c.createLinearGradient(0, top, 0, top + 110);
-    g.addColorStop(0, '#FF7A45');
-    g.addColorStop(0.15, COLORS.red);
-    g.addColorStop(1, '#3b0712');
-    c.fillStyle = g;
-    c.shadowColor = COLORS.red;
-    c.shadowBlur = 25;
-    c.fill();
-    c.shadowBlur = 0;
-
-    // hot surface line
-    c.strokeStyle = '#FFD27A';
-    c.lineWidth = 2;
-    c.beginPath();
-    for (let x = 0; x <= W; x += 12) {
-      const y = top + Math.sin(x * 0.03 + t * 2.2) * 3 + Math.sin(x * 0.075 - t * 3.1) * 2;
-      if (x === 0) c.moveTo(x, y); else c.lineTo(x, y);
-    }
+    for (let y = top + 10; y < bottom; y += 12) { c.moveTo(0, y); c.lineTo(W, y); }
+    const shift = (t * 30) % 24;
+    for (let x = -24 + shift; x < W; x += 24) { c.moveTo(x, top); c.lineTo(x, bottom); }
     c.stroke();
 
-    // bubbles drifting inside
-    c.fillStyle = 'rgba(255,210,122,0.35)';
-    for (let i = 0; i < 7; i++) {
-      const bx = (i * 83 + t * (12 + i * 3)) % W;
-      const by = top + 14 + ((i * 37 + t * 18) % 30);
-      c.beginPath(); c.arc(bx, by, 2 + (i % 3), 0, Math.PI * 2); c.fill();
+    // warning label
+    c.font = 'bold 11px "Trebuchet MS", sans-serif';
+    c.textAlign = 'center';
+    c.fillStyle = 'rgba(255,90,90,' + (0.35 + 0.2 * Math.sin(t * 5)).toFixed(3) + ')';
+    c.fillText('!  LASER ALARM FLOOR  !', W / 2, top + 26);
+
+    // the main beam (slight flicker)
+    const flick = 0.8 + 0.2 * Math.sin(t * 37) * Math.sin(t * 7);
+    c.save();
+    c.shadowColor = '#FF2A2A';
+    c.shadowBlur = 18;
+    c.strokeStyle = 'rgba(255,59,59,' + flick.toFixed(3) + ')';
+    c.lineWidth = 4;
+    c.beginPath(); c.moveTo(0, top); c.lineTo(W, top); c.stroke();
+    c.shadowBlur = 0;
+    c.strokeStyle = 'rgba(255,225,225,0.9)';
+    c.lineWidth = 1.2;
+    c.stroke();
+    c.restore();
+
+    // emitters on both walls
+    for (const ex of [0, W - 10]) {
+      c.fillStyle = '#2A2D33';
+      c.fillRect(ex, top - 8, 10, 16);
+      c.fillStyle = COLORS.red;
+      c.fillRect(ex + 3, top - 2, 4, 4);
     }
   }
 
-  /** Red edge warning that grows as the player gets close to the lava. */
+  /** Red edge warning that grows as the player gets close to the alarm floor. */
   function drawDangerVignette(c) {
     if (state !== 'playing' && state !== 'paused') return;
     if (!player || run.dead) return;
@@ -1569,7 +1704,7 @@
     ui.overBest.textContent = best;
     ui.overPrev.textContent = run.prevBest;
     ui.newRecord.classList.toggle('show', isRecord && final > 0);
-    ui.overCause.textContent = run.cause === 'lava' ? 'You touched the floor.' : run.cause === 'spikes' ? 'Spiked! Watch the red edges.' : 'A hazard got you.';
+    ui.overCause.textContent = run.cause === 'lava' ? 'Busted! You tripped the laser alarm floor.' : run.cause === 'spikes' ? 'Snagged on the barbed wire!' : 'A hazard got you.';
     ui.overDetail.textContent = run.heightM + ' m climbed · ' + formatTime(run.time) + ' survived · stage ' + run.stage;
     ui.menuBest.textContent = best;
     if (isRecord && final > 0 && run.prevBest > 0) Sound.record();
