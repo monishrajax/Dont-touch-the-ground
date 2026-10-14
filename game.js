@@ -228,9 +228,18 @@
     const s = Math.min(vw / W, vh / H);
     const cssW = Math.floor(W * s);
     const cssH = Math.floor(H * s);
+    const fontPx = Math.max(10, 17 * s);
     stageEl.style.width = cssW + 'px';
     stageEl.style.height = cssH + 'px';
-    stageEl.style.fontSize = Math.max(10, 17 * s) + 'px';
+    stageEl.style.fontSize = fontPx + 'px';
+
+    // Touch controls go underneath the game if the screen has spare height.
+    const touchBar = document.querySelector('.touch');
+    const isTouch = document.body.classList.contains('is-touch');
+    const below = isTouch && vh - cssH >= fontPx * 6.6;
+    document.body.classList.toggle('touch-below', below);
+    touchBar.style.fontSize = fontPx + 'px';
+    touchBar.style.width = below ? cssW + 'px' : '';
     const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
     canvas.width = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
@@ -1441,6 +1450,17 @@
   }
 
   function boot() {
+    // Touch device detection -> show on-screen controls (must run before resize()).
+    const markTouch = () => {
+      if (document.body.classList.contains('is-touch')) return;
+      document.body.classList.add('is-touch');
+      resize();
+    };
+    if ((window.matchMedia && window.matchMedia('(pointer: coarse)').matches) || 'ontouchstart' in window) {
+      document.body.classList.add('is-touch');
+    }
+    window.addEventListener('touchstart', markTouch, { once: true, passive: true });
+
     resize();
     initStars();
     initMenuScene();
@@ -1464,11 +1484,6 @@
       if (btn.blur && !btn.classList.contains('primary')) btn.blur();
     });
     document.querySelectorAll('[data-hold]').forEach(bindTouchButton);
-
-    // Touch device detection -> show on-screen controls.
-    const markTouch = () => document.body.classList.add('is-touch');
-    if ((window.matchMedia && window.matchMedia('(pointer: coarse)').matches) || 'ontouchstart' in window) markTouch();
-    window.addEventListener('touchstart', markTouch, { once: true, passive: true });
 
     // Losing focus / hiding the tab: pause and drop held keys, no physics jump on return.
     window.addEventListener('blur', () => {

@@ -87,16 +87,17 @@
         <button class="btn primary" data-action="again">&#8635; PLAY AGAIN</button>
         <button class="btn ghost" data-action="menu">MAIN MENU</button>
       </section>
+    </div>
 
-      <!-- ============ TOUCH CONTROLS (shown on touch devices while playing) ============ -->
-      <div class="touch" aria-hidden="true">
-        <div class="touch-group">
-          <button class="tbtn" data-hold="left" aria-label="Move left">&#9664;</button>
-          <button class="tbtn" data-hold="right" aria-label="Move right">&#9654;</button>
-        </div>
-        <div class="touch-group">
-          <button class="tbtn jump" data-hold="jump" aria-label="Jump">&#9650;</button>
-        </div>
+    <!-- ============ TOUCH CONTROLS (touch devices, while playing) ============
+         Sits below the game when the screen has room, otherwise overlays the bottom. -->
+    <div class="touch" aria-hidden="true">
+      <div class="touch-group">
+        <button class="tbtn" data-hold="left" aria-label="Move left">&#9664;</button>
+        <button class="tbtn" data-hold="right" aria-label="Move right">&#9654;</button>
+      </div>
+      <div class="touch-group">
+        <button class="tbtn jump" data-hold="jump" aria-label="Jump">&#9650;</button>
       </div>
     </div>
   </main>

@@ -35,7 +35,7 @@ body {
     var(--bg);
 }
 
-#app { position: fixed; inset: 0; display: grid; place-items: center; }
+#app { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 
 #stage {
   position: relative;
@@ -210,11 +210,19 @@ kbd {
 
 /* ---------------- Touch controls ---------------- */
 .touch {
-  position: absolute; left: 0; right: 0; bottom: 0;
-  display: none; justify-content: space-between; align-items: flex-end;
-  padding: 0 1em 1.2em; pointer-events: none;
+  display: none; justify-content: space-between; align-items: center;
+  pointer-events: none; visibility: hidden;
 }
-body.is-touch #stage[data-state="playing"] .touch { display: flex; }
+body.is-touch .touch { display: flex; }
+body.is-touch #stage[data-state="playing"] ~ .touch { visibility: visible; }
+/* Not enough room below the game: overlay the bottom of the screen. */
+body:not(.touch-below) .touch {
+  position: fixed; left: 0; right: 0; bottom: 0;
+  align-items: flex-end;
+  padding: 0 1em calc(1.2em + env(safe-area-inset-bottom));
+}
+/* Tall screens (phones in portrait): controls live in the free space under the game. */
+body.touch-below .touch { padding: 0.8em 0.6em calc(0.4em + env(safe-area-inset-bottom)); }
 .touch-group { display: flex; gap: 0.8em; }
 .tbtn {
   pointer-events: auto; touch-action: none;
