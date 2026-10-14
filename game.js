@@ -54,26 +54,37 @@
   const PLAYER_W = 26;
   const PLAYER_H = 34;
   const PLAT_H = 14;
-  const LAVA_MIN_VISIBLE = 40;   // lava is always at least this far onto the screen
+  // The deadly floor is a laser alarm grid. (In code it's still called "lava":
+  // lavaY is its surface.) It is always at least this far onto the screen.
+  const LAVA_MIN_VISIBLE = 40;
 
+  // Prison-break palette
   const COLORS = {
-    bg: '#080B16', cyan: '#00E5FF', purple: '#A855F7', red: '#FF4D4D',
-    green: '#39FF88', text: '#F8FAFC', amber: '#FFB02E', ghost: '#E6F4FF',
+    bg: '#121417',        // dark concrete
+    primary: '#FF8A1F',   // prison orange
+    steel: '#8FA3BF',     // steel blue-gray
+    red: '#FF3B3B',       // alarms, lasers, hazards
+    yellow: '#FFD23F',    // searchlights, highlights
+    text: '#F1F1EE',
+    amber: '#FFB02E',
+    dust: '#A8A29E',      // concrete dust
   };
 
+  // Platform looks: `color` is the accent (top edge, particles), `body` the fill,
+  // `edge` the outline.
   const PLAT_STYLE = {
-    normal:  { color: COLORS.cyan,   fill: 'rgba(0,229,255,0.16)' },
-    moving:  { color: COLORS.purple, fill: 'rgba(168,85,247,0.22)' },
-    bouncy:  { color: COLORS.green,  fill: 'rgba(57,255,136,0.18)' },
-    vanish:  { color: COLORS.ghost,  fill: 'rgba(230,244,255,0.07)' },
-    crumble: { color: COLORS.amber,  fill: 'rgba(255,176,46,0.18)' },
+    normal:  { color: '#AEB8C6', body: '#48505C', edge: '#262B33' }, // steel girder
+    moving:  { color: '#6E9BFF', body: '#2C4A8C', edge: '#18294D' }, // blue moving beam
+    bouncy:  { color: '#EDE7D3', body: '#B9B19B', edge: '#5F5848' }, // bunk mattress
+    vanish:  { color: '#C9D4E0', body: 'rgba(201,212,224,0.08)', edge: '#C9D4E0' }, // chain-link mesh
+    crumble: { color: '#D2774A', body: '#8A4A2E', edge: '#4A2414' }, // crumbling bricks
   };
 
   // Height (in metres, 1 m = 10 px) at which each difficulty stage begins.
   const STAGE_AT = [0, 120, 280, 480, 720];
   const STAGE_EXTRA_EVERY = 350; // after stage 5, +1 stage every 350 m
   const STAGE_INFO = {
-    1: 'WARM-UP',
+    1: 'CELL BLOCK',
     2: 'MOVING PLATFORMS',
     3: 'HAZARDS AHEAD',
     4: 'VANISHING PLATFORMS',
@@ -84,14 +95,15 @@
   const STORE_SETTINGS = 'dttf.settings';
   const STORE_NAME = 'dttf.name';
 
-  // Character colour schemes. Index 0 is the default (single player / host).
+  // Prisoner jumpsuits. Index 0 is the default (single player / host).
+  // suit = main colour, stripe = stripe colour, color = UI accent (name tags, scoreboard).
   const LOOKS = [
-    { top: '#5ef2ff', bottom: '#7c3aed', leg: '#7dd3fc', color: '#00E5FF' }, // cyan
-    { top: '#ff8ad8', bottom: '#be185d', leg: '#fbcfe8', color: '#FF4DD2' }, // pink
-    { top: '#ffe27a', bottom: '#c2410c', leg: '#fef3c7', color: '#FFD23F' }, // yellow
-    { top: '#8affc1', bottom: '#047857', leg: '#bbf7d0', color: '#39FF88' }, // green
-    { top: '#d0b0ff', bottom: '#5b21b6', leg: '#ddd6fe', color: '#B583FF' }, // violet
-    { top: '#ffb37a', bottom: '#b91c1c', leg: '#fed7aa', color: '#FF8A3D' }, // orange
+    { suit: '#F2F2EE', stripe: '#24262B', color: '#F2F2EE' }, // classic black & white
+    { suit: '#FF8A1F', stripe: '#A84F00', color: '#FF8A1F' }, // orange
+    { suit: '#5AA9FF', stripe: '#1D4E89', color: '#5AA9FF' }, // blue
+    { suit: '#45D98F', stripe: '#13704A', color: '#45D98F' }, // green
+    { suit: '#FF6FAE', stripe: '#9C1F57', color: '#FF6FAE' }, // pink
+    { suit: '#FFD23F', stripe: '#A67C00', color: '#FFD23F' }, // yellow
   ];
   const MAX_PLAYERS = LOOKS.length;
 
@@ -698,7 +710,7 @@
       input.jumpBuffer = 0;
       Sound.jump();
       for (let i = 0; i < 7; i++) {
-        spawnParticle(p.x + p.w / 2 + rand(-8, 8), p.y + p.h, rand(-70, 70), rand(10, 70), rand(0.25, 0.45), rand(2, 3.5), COLORS.cyan, {});
+        spawnParticle(p.x + p.w / 2 + rand(-8, 8), p.y + p.h, rand(-70, 70), rand(10, 70), rand(0.25, 0.45), rand(2, 3.5), COLORS.dust, {});
       }
     }
 
@@ -759,7 +771,7 @@
         pl.visited = true;
         run.platformsLanded++;
         run.bonus += 5;
-        spawnParticle(p.x + p.w / 2, pl.y - 40, 0, -45, 0.8, 14, COLORS.green, { shape: 'text', text: '+5' });
+        spawnParticle(p.x + p.w / 2, pl.y - 40, 0, -45, 0.8, 14, COLORS.yellow, { shape: 'text', text: '+5' });
       }
     }
 
@@ -772,7 +784,7 @@
         pl.bounceAnim = 1;
         Sound.bounce();
         for (let i = 0; i < 10; i++) {
-          spawnParticle(p.x + p.w / 2 + rand(-12, 12), pl.y, rand(-60, 60), rand(-220, -80), rand(0.3, 0.6), rand(2, 3.5), COLORS.green, { g: 400 });
+          spawnParticle(p.x + p.w / 2 + rand(-12, 12), pl.y, rand(-60, 60), rand(-220, -80), rand(0.3, 0.6), rand(2, 3.5), PLAT_STYLE.bouncy.color, { g: 400 });
         }
         break;
       case 'crumble':
@@ -848,7 +860,7 @@
       run.celebrated = true;
       showToast('NEW RECORD!', 'record');
       Sound.record();
-      const colors = [COLORS.cyan, COLORS.purple, COLORS.green, COLORS.text];
+      const colors = [COLORS.primary, COLORS.yellow, COLORS.steel, COLORS.text];
       for (let i = 0; i < 40; i++) {
         spawnParticle(player.x + player.w / 2, player.y, rand(-260, 260), rand(-420, -120), rand(0.8, 1.4), rand(3, 5), colors[i % 4], { g: 700, shape: 'rect' });
       }
@@ -1151,8 +1163,8 @@
     c.textAlign = 'center';
     c.textBaseline = 'middle';
     c.font = '900 ' + Math.round(80 + frac * 40) + 'px "Trebuchet MS", sans-serif';
-    c.fillStyle = counting ? COLORS.text : COLORS.green;
-    c.shadowColor = counting ? COLORS.cyan : COLORS.green;
+    c.fillStyle = counting ? COLORS.text : COLORS.yellow;
+    c.shadowColor = counting ? COLORS.primary : COLORS.yellow;
     c.shadowBlur = 30;
     c.globalAlpha = counting ? 1 : frac;
     c.fillText(txt, W / 2, H * 0.4);
