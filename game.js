@@ -1598,7 +1598,7 @@
       const dz = z - camZ;
       if (dz < 0.45) continue;
       const foot = P(x, 0, z);
-      const scale = (1.75 * f) / dz / PLAYER_H;
+      const scale = (1.5 * f) / dz / PLAYER_H;
       c.fillStyle = 'rgba(0,0,0,0.4)';
       c.beginPath(); c.ellipse(foot[0], foot[1], (0.45 * f) / dz, (0.12 * f) / dz, 0, 0, Math.PI * 2); c.fill();
       const p = r.p;
@@ -1607,7 +1607,7 @@
       p.runPhase = u * 16 + r.idx * 1.7;
       drawPrisoner(c, p, r.look, foot[0], foot[1], scale);
       if (mode === 'multi' && r.name) {
-        cellNameTag(c, r.name + (r.key === 'me' ? ' (you)' : ''), r.look.color, foot[0], foot[1] - PLAYER_H * scale - 14);
+        cellNameTag(c, r.name + (r.key === 'me' ? ' (you)' : ''), r.look.color, foot[0], foot[1] - (PLAYER_H + 5) * scale - 8);
       }
     }
 

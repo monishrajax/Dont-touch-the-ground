@@ -45,6 +45,17 @@ Rules and notes:
 
 How it works: players connect directly to each other with WebRTC data channels, using the [PeerJS](https://peerjs.com) library. PeerJS's free public server only introduces players to each other; the host's game code is part of their PeerJS id. Everyone connects to the host, and the host relays position updates (15 per second) to the others. Each player runs their own physics, so controls feel instant even with lag.
 
+## The jail cell and the escape
+
+- **Lobby:** the main menu and the multiplayer lobby take place inside a jail cell: bricks, a barred window, a bunk bed, a steel toilet, tally marks and a swinging bulb, all behind the cell bars. Your prisoner paces around inside. In multiplayer, everyone in the lobby is in the same cell, each in their own jumpsuit colour and with a name tag.
+- **Escape scene:** pressing **PLAY** (or **Enter**) plays a 5-second escape before the run starts:
+  1. **Lockdown breach:** sirens, spinning red alarm lights, and the gate slides open.
+  2. **Corridor run:** a pseudo-3D chase down the cell block, with the prisoners sprinting straight at the camera past barred cells, ceiling lamps and the guards' flashlights.
+  3. **ESCAPED!** They burst out into daylight, and the game fades in.
+- In single player, press **Space** or tap to skip it. **Play again** after a game over starts straight away.
+- In multiplayer, the host presses **START ESCAPE**. Every player watches the same escape with all the prisoners, then gets the 3-2-1 countdown. It can't be skipped, so everyone starts together.
+- The 3D is drawn on the normal canvas with a small perspective projection (`renderCorridor()` in `game.js`). No 3D library is used, so the game still works offline.
+
 ## Screen sizes
 
 - **Laptops and monitors:** the game fills the whole screen. Wider screens get a wider prison (up to 1280 units across) split into 2–3 side-by-side towers, so there are several routes up. Every tower is always climbable.
