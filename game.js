@@ -242,6 +242,31 @@
     record()  { [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.16, { type: 'triangle', vol: 0.07, delay: i * 0.09 })); },
     tick()    { this.tone(440, 0.12, { type: 'triangle', vol: 0.07 }); },
     go()      { this.tone(880, 0.3, { type: 'triangle', vol: 0.08 }); },
+    step()    { this.tone(70 + Math.random() * 25, 0.06, { type: 'sine', vol: 0.08 }); },
+    /** Two-tone prison siren lasting `dur` seconds. */
+    siren(dur) {
+      if (!this.ctx || this.muted) return;
+      try {
+        const t = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(620, t);
+        for (let i = 1; i * 0.45 <= dur; i++) osc.frequency.linearRampToValueAtTime(i % 2 ? 880 : 620, t + i * 0.45);
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.exponentialRampToValueAtTime(0.03, t + 0.08);
+        gain.gain.setValueAtTime(0.03, t + Math.max(0.1, dur - 0.4));
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        osc.connect(gain).connect(this.ctx.destination);
+        osc.start(t);
+        osc.stop(t + dur + 0.05);
+        this.sirenOsc = osc;
+      } catch (e) { /* ignore */ }
+    },
+    stopSiren() {
+      try { if (this.sirenOsc) this.sirenOsc.stop(); } catch (e) { /* ignore */ }
+      this.sirenOsc = null;
+    },
     join()    { this.tone(660, 0.08, { type: 'sine', vol: 0.06 }); this.tone(990, 0.12, { type: 'sine', vol: 0.06, delay: 0.08 }); },
     gameOver() {
       this.noise(0.35, 0.14);
@@ -308,9 +333,7 @@
   function resize() {
     const { vw, vh } = screenSize();
     const isTouch = document.body.classList.contains('is-touch');
-    const oldW = W;
     W = worldLock || preferredWidth();
-    if (W !== oldW && !worldLock) shiftScene((W - oldW) / 2); // keep the menu scene centred
     const s = Math.min(vw / W, vh / H_MIN);
     const fontPx = Math.max(10, 17 * s);
 
@@ -391,7 +414,10 @@
     const confirmKey = code === 'Enter' || code === 'Space';
     switch (state) {
       case 'menu':
-        if (confirmKey) { e.preventDefault(); startGame(); }
+        if (confirmKey) { e.preventDefault(); beginSoloEscape(); }
+        break;
+      case 'escape':
+        if (confirmKey || code === 'Escape') { e.preventDefault(); skipEscape(); }
         break;
       case 'playing':
         if (code === 'KeyP' || code === 'Escape') togglePause();
@@ -1023,8 +1049,8 @@
     if (shake > 0) shake = Math.max(0, shake - dt);
     if (flash > 0) flash = Math.max(0, flash - dt * 1.6);
 
-    // occasional embers rising from the lava
-    if (Math.random() < dt * 9) {
+    // occasional sparks rising from the alarm floor (in-game only)
+    if ((state === 'playing' || state === 'gameover') && Math.random() < dt * 9) {
       spawnParticle(rand(0, W), lavaY + 4, rand(-10, 10), rand(-70, -30), rand(0.6, 1.3), rand(1.5, 3), Math.random() < 0.5 ? COLORS.red : COLORS.amber, {});
     }
   }
@@ -1037,9 +1063,20 @@
   }
 
   /* ==================================================================
-     10. MENU ATTRACT SCENE - a demo character hopping between platforms
+     10. JAIL CELL (menu + lobby) and the ESCAPE CUTSCENE
+     The menu and the multiplayer lobby show the prisoner(s) pacing inside a
+     cell. Starting a game plays a short escape: the alarm goes off, the bars
+     slide open, everyone sprints down the cell-block corridor (pseudo-3D:
+     points are projected with a simple perspective camera), and bursts out
+     into daylight - then the game begins.
      ================================================================== */
-  const demo = { seq: [0, 1, 2, 3, 2, 1], i: 0, phase: 'rest', t: 0 };
+  const CELL_SCALE = 2;                 // prisoners are drawn twice as big in the cell
+  const cell = { cast: new Map() };     // key -> pacing prisoner ('me' = the local player)
+
+  /** Screens that show the cell behind their menu. */
+  const isCellState = () => state === 'menu' || state === 'help' || state === 'mp' || state === 'lobby';
+
+  function cellFloorY() { return H - Math.max(46, H * 0.075); }
 
   function initMenuScene() {
     worldLock = 0; // no run any more: the world follows the screen size again
@@ -1047,86 +1084,550 @@
     run = newRunData();
     particles = [];
     hazards = [];
-    camY = H_MIN - H; // taller screens see extra sky; the bottom lines up the same everywhere
-    lavaY = camY + H - LAVA_MIN_VISIBLE;
+    platforms = [];
+    camY = 0;
+    lavaY = H + 100;
     shake = 0;
     flash = 0;
-    const ox = (W - W_MIN) / 2; // the demo is laid out for 480 wide; centre it
-    platforms = [
-      makePlatform('normal', ox + 50, 560, 130),
-      makePlatform('bouncy', ox + 290, 470, 110),
-      makePlatform('moving', ox + 150, 360, 110),
-      makePlatform('crumble', ox + 300, 250, 110),
-      makePlatform('vanish', ox + 30, 200, 100),
-    ];
-    const mv = platforms[2];
-    mv.baseX = ox + 150; mv.range = 40; mv.speed = 1.2;
-    hazards.push({ kind: 'saw', x: ox + 90, y: 120, baseX: ox + 90, baseY: 120, r: 16, range: 50, speed: 1.4, phase: 0, ang: 0 });
-    // wide screens: a few extra (decorative) platforms on the sides
-    if (ox >= 200) {
-      platforms.push(
-        makePlatform('normal', ox - 190, 520, 120), makePlatform('moving', ox - 230, 380, 110),
-        makePlatform('normal', ox - 150, 240, 100), makePlatform('normal', ox + 520, 500, 120),
-        makePlatform('bouncy', ox + 580, 360, 100), makePlatform('normal', ox + 500, 210, 110),
-      );
-      const side = platforms[6];
-      side.baseX = side.x; side.range = 40; side.speed = 0.9;
-      hazards.push({ kind: 'orb', x: ox + 640, y: 120, baseX: ox + 640, baseY: 120, r: 13, range: 20, speed: 2, phase: 0, ang: 0 });
-    }
     player = makePlayer(0, 0);
-    demo.i = 0; demo.phase = 'rest'; demo.t = 0;
-    placeDemoHero(platforms[0]);
+    syncCell();
   }
 
-  /** Slide the whole menu scene sideways (used when the window is resized). */
-  function shiftScene(dx) {
-    if (!player) return;
-    for (const p of platforms) { p.x += dx; p.baseX += dx; }
-    for (const h of hazards) { h.x += dx; h.baseX += dx; }
-    for (const q of particles) q.x += dx;
-    player.x += dx;
+  /** The fields drawPlayer() needs to animate a prisoner. */
+  function makeSprite() {
+    return { w: PLAYER_W, h: PLAYER_H, vx: 0, vy: 0, face: 1, ground: true, runPhase: Math.random() * 6, squash: 0 };
   }
 
-  function placeDemoHero(pl) {
-    player.x = pl.x + pl.w / 2 - PLAYER_W / 2;
-    player.y = pl.y - PLAYER_H;
+  /** Who is in the cell: just you, or everyone in the multiplayer lobby. */
+  function cellEntries() {
+    if (mode === 'multi' && mp.players.length) {
+      return mp.players.map((p) => ({ key: p.id === mp.myId ? 'me' : p.id, name: p.name, look: lookFor(p.color) }));
+    }
+    return [{ key: 'me', name: '', look: LOOKS[0] }];
   }
 
-  function stepMenu(dt) {
-    run.clock += dt;
-    updatePlatforms(dt, run.clock);
-    updateHazards(dt, run.clock);
+  function syncCell() {
+    const entries = cellEntries();
+    const keys = new Set(entries.map((e) => e.key));
+    for (const k of [...cell.cast.keys()]) if (!keys.has(k)) cell.cast.delete(k);
+    for (const e of entries) {
+      let pr = cell.cast.get(e.key);
+      if (!pr) {
+        pr = { ...makeSprite(), x: rand(80, Math.max(90, W - 80)), tx: 0, wait: rand(0.2, 1.5) };
+        pr.tx = pr.x;
+        cell.cast.set(e.key, pr);
+        // a puff of dust when someone new lands in the cell
+        for (let i = 0; i < 14; i++) {
+          spawnParticle(pr.x, cellFloorY() - 20, rand(-90, 90), rand(-120, -20), rand(0.4, 0.8), rand(3, 6), COLORS.dust, { g: 300 });
+        }
+      }
+      pr.key = e.key;
+      pr.name = e.name;
+      pr.look = e.look;
+    }
+  }
+
+  /** Prisoners wander around the cell, stop, and sometimes turn to face you. */
+  function stepCell(dt) {
+    syncCell();
     updateEffects(dt);
-
-    const a = platforms[demo.seq[demo.i]];
-    const b = platforms[demo.seq[(demo.i + 1) % demo.seq.length]];
-    demo.t += dt;
-    if (demo.phase === 'rest') {
-      placeDemoHero(a);
-      player.vx = 0; player.vy = 0; player.ground = a;
-      if (demo.t > 0.45) { demo.phase = 'hop'; demo.t = 0; }
-    } else {
-      const T = 0.8, arc = 95;
-      const u = Math.min(1, demo.t / T);
-      const ax = a.x + a.w / 2 - PLAYER_W / 2, ay = a.y - PLAYER_H;
-      const bx = b.x + b.w / 2 - PLAYER_W / 2, by = b.y - PLAYER_H;
-      player.x = lerp(ax, bx, u);
-      player.y = lerp(ay, by, u) - 4 * arc * u * (1 - u);
-      player.vx = (bx - ax) / T;
-      player.vy = ((by - ay) - 4 * arc * (1 - 2 * u)) / T;
-      player.face = bx >= ax ? 1 : -1;
-      player.ground = null;
-      if (u >= 1) {
-        demo.i = (demo.i + 1) % demo.seq.length;
-        demo.phase = 'rest';
-        demo.t = 0;
-        player.squash = 0.4;
-        b.glow = 0.3;
-        spawnParticle(player.x + PLAYER_W / 2, b.y, 0, 0, 0.35, 10, PLAT_STYLE[b.type].color, { shape: 'ring' });
+    const minX = 50, maxX = Math.max(60, W - 50);
+    for (const pr of cell.cast.values()) {
+      pr.x = clamp(pr.x, minX, maxX);
+      if (pr.wait > 0) {
+        pr.wait -= dt;
+        pr.vx = 0;
+        if (pr.wait <= 0) pr.tx = rand(minX, maxX);
+      } else {
+        const dx = pr.tx - pr.x;
+        if (Math.abs(dx) < 4) {
+          pr.wait = rand(0.6, 2.6);
+          if (Math.random() < 0.5) pr.face = 0; // look out through the bars
+        } else {
+          pr.face = Math.sign(dx);
+          pr.vx = Math.sign(dx) * 200;           // only drives the walking animation
+          pr.x += Math.sign(dx) * Math.min(Math.abs(dx), 85 * dt);
+          pr.runPhase += dt * 9;
+        }
       }
     }
-    player.runPhase += dt * 6;
-    if (player.squash > 0) player.squash = Math.max(0, player.squash - dt * 6);
+  }
+
+  /** Draw a prisoner with its feet at (sx, footY), `scale` times normal size. */
+  function drawPrisoner(c, p, look, sx, footY, scale, alpha = 1) {
+    c.save();
+    c.translate(sx, footY);
+    c.scale(scale, scale);
+    drawPlayer(c, p, -p.w / 2, -p.h, look, alpha);
+    c.restore();
+  }
+
+  function cellNameTag(c, text, color, x, y) {
+    c.save();
+    c.font = 'bold 13px "Trebuchet MS", sans-serif';
+    c.textAlign = 'center';
+    const w = c.measureText(text).width + 14;
+    c.fillStyle = 'rgba(8,9,11,0.78)';
+    roundRect(c, x - w / 2, y - 14, w, 19, 6);
+    c.fill();
+    c.fillStyle = color;
+    c.fillText(text, x, y);
+    c.restore();
+  }
+
+  /** The cell itself. `alarmT` (seconds) turns on the spinning red alarm light. */
+  function drawCellRoom(c, alarmT) {
+    const t = visualTime;
+    const fy = cellFloorY();
+
+    // back wall with bricks, dark at the top
+    c.fillStyle = '#1C1F24';
+    c.fillRect(0, 0, W, fy);
+    c.strokeStyle = 'rgba(255,255,255,0.05)';
+    c.lineWidth = 1;
+    c.beginPath();
+    for (let r = 0, y = 0; y < fy; r++, y += 26) {
+      c.moveTo(0, y); c.lineTo(W, y);
+      for (let x = (r & 1) ? -28 : 0; x < W; x += 56) { c.moveTo(x, y); c.lineTo(x, Math.min(y + 26, fy)); }
+    }
+    c.stroke();
+    const shade = c.createLinearGradient(0, 0, 0, fy);
+    shade.addColorStop(0, 'rgba(0,0,0,0.55)');
+    shade.addColorStop(1, 'rgba(0,0,0,0.05)');
+    c.fillStyle = shade;
+    c.fillRect(0, 0, W, fy);
+
+    // barred window with a shaft of moonlight
+    const wx = W * 0.7 - 55, wy = H * 0.1;
+    c.fillStyle = 'rgba(170,190,255,0.07)';
+    c.beginPath();
+    c.moveTo(wx, wy + 72); c.lineTo(wx + 110, wy + 72); c.lineTo(wx + 40, fy); c.lineTo(wx - 110, fy);
+    c.closePath();
+    c.fill();
+    c.fillStyle = '#0B0C0F';
+    c.fillRect(wx - 6, wy - 6, 122, 84);
+    const moon = c.createLinearGradient(0, wy, 0, wy + 72);
+    moon.addColorStop(0, '#2A3A55');
+    moon.addColorStop(1, '#17202F');
+    c.fillStyle = moon;
+    c.fillRect(wx, wy, 110, 72);
+    c.fillStyle = 'rgba(220,230,255,0.6)';
+    c.beginPath(); c.arc(wx + 80, wy + 22, 8, 0, Math.PI * 2); c.fill();
+    c.fillStyle = '#3B4048';
+    for (let b = 1; b < 6; b++) c.fillRect(wx + b * 18.3 - 2, wy, 4, 72);
+    c.fillRect(wx, wy + 34, 110, 4);
+
+    // tally marks scratched into the wall
+    c.strokeStyle = 'rgba(235,230,215,0.3)';
+    c.lineWidth = 2;
+    c.beginPath();
+    for (let g = 0; g < 4; g++) {
+      const gx = W * 0.18 + g * 38, gy = H * 0.3;
+      for (let i = 0; i < 4; i++) { c.moveTo(gx + i * 6, gy); c.lineTo(gx + i * 6 + 1, gy + 26); }
+      c.moveTo(gx - 4, gy + 20); c.lineTo(gx + 24, gy + 6);
+    }
+    c.stroke();
+
+    // bunk bed (left)
+    const bx = Math.max(16, W * 0.04), bw = 190;
+    c.fillStyle = '#5A616C';
+    c.fillRect(bx, fy - 150, 6, 150);
+    c.fillRect(bx + bw - 6, fy - 150, 6, 150);
+    for (const by of [fy - 130, fy - 58]) {
+      c.fillStyle = '#4A5059';
+      c.fillRect(bx, by + 14, bw, 6);
+      c.fillStyle = '#CFC8B4';
+      roundRect(c, bx + 4, by, bw - 8, 16, 5); c.fill();
+      c.fillStyle = 'rgba(70,90,140,0.3)';
+      for (let sx = bx + 12; sx < bx + bw - 10; sx += 12) c.fillRect(sx, by + 3, 4, 11);
+      c.fillStyle = '#EDE9DD';
+      roundRect(c, bx + 10, by - 7, 42, 11, 5); c.fill();
+    }
+
+    // steel toilet + sink (right)
+    const tx = W - Math.max(16, W * 0.04) - 70;
+    c.fillStyle = '#9AA3AE';
+    roundRect(c, tx + 8, fy - 96, 46, 12, 4); c.fill();
+    c.fillRect(tx + 26, fy - 84, 10, 24);
+    c.fillStyle = '#8D96A1';
+    c.fillRect(tx + 40, fy - 70, 22, 34);
+    c.fillStyle = '#B8C0CA';
+    roundRect(c, tx, fy - 40, 58, 14, 6); c.fill();
+    c.fillStyle = '#8D96A1';
+    c.fillRect(tx + 14, fy - 28, 30, 28);
+
+    // swinging light bulb
+    const ax = W * 0.42, len = H * 0.22, ang = Math.sin(t * 1.3) * 0.12;
+    const lx = ax + Math.sin(ang) * len, ly = Math.cos(ang) * len;
+    const glow = c.createRadialGradient(lx, ly, 2, lx, ly, H * 0.5);
+    glow.addColorStop(0, 'rgba(255,220,140,0.22)');
+    glow.addColorStop(1, 'rgba(255,220,140,0)');
+    c.fillStyle = glow;
+    c.fillRect(0, 0, W, fy);
+    c.strokeStyle = '#2A2D33';
+    c.lineWidth = 2;
+    c.beginPath(); c.moveTo(ax, 0); c.lineTo(lx, ly); c.stroke();
+    c.fillStyle = '#FFE6A8';
+    c.beginPath(); c.arc(lx, ly + 6, 7, 0, Math.PI * 2); c.fill();
+
+    // concrete floor
+    c.fillStyle = '#25282E';
+    c.fillRect(0, fy, W, H - fy);
+    c.fillStyle = 'rgba(255,255,255,0.08)';
+    c.fillRect(0, fy, W, 2);
+    c.strokeStyle = 'rgba(0,0,0,0.35)';
+    c.lineWidth = 1;
+    c.beginPath();
+    for (let x = 30; x < W + 30; x += 90) { c.moveTo(x, fy + 2); c.lineTo(x - 30, H); }
+    c.stroke();
+
+    // alarm: spinning red beacon
+    if (alarmT !== undefined) {
+      const cx = W / 2;
+      c.save();
+      const beam = c.createRadialGradient(cx, 10, 4, cx, 10, Math.max(W, H));
+      beam.addColorStop(0, 'rgba(255,40,40,0.5)');
+      beam.addColorStop(1, 'rgba(255,40,40,0)');
+      c.fillStyle = beam;
+      for (const off of [0, Math.PI]) {
+        const a = alarmT * 7 + off;
+        c.beginPath();
+        c.moveTo(cx, 10);
+        c.lineTo(cx + Math.cos(a - 0.3) * W, 10 + Math.abs(Math.sin(a - 0.3)) * H);
+        c.lineTo(cx + Math.cos(a + 0.3) * W, 10 + Math.abs(Math.sin(a + 0.3)) * H);
+        c.closePath();
+        c.fill();
+      }
+      c.restore();
+      c.fillStyle = COLORS.red;
+      c.beginPath(); c.arc(cx, 10, 9, 0, Math.PI * 2); c.fill();
+    }
+  }
+
+  /** The cell's front bars (in front of everything). `offset` slides the gate. */
+  function drawCellBars(c, offset) {
+    const fy = cellFloorY();
+    const cy = fy * 0.58;
+    c.save();
+    c.translate(offset, 0);
+    c.fillStyle = '#2E3238';
+    c.fillRect(0, 0, W, 12);
+    c.fillRect(0, cy, W, 8);
+    c.fillRect(0, H - 10, W, 10);
+    for (let x = 18; x < W; x += 64) {
+      c.fillStyle = '#3A3F47';
+      c.fillRect(x, 0, 8, H);
+      c.fillStyle = 'rgba(255,255,255,0.16)';
+      c.fillRect(x + 1, 0, 2, H);
+    }
+    c.fillStyle = '#4A5059';
+    c.fillRect(W - 64, cy - 16, 34, 40);           // lock box
+    c.fillStyle = COLORS.yellow;
+    c.fillRect(W - 51, cy, 8, 8);
+    c.restore();
+  }
+
+  /** Menu / lobby: everyone pacing in the cell, behind the bars. */
+  function renderCell(c) {
+    drawCellRoom(c);
+    const fy = cellFloorY();
+    const list = [...cell.cast.values()].sort((a, b) => a.x - b.x);
+    for (const pr of list) {
+      c.fillStyle = 'rgba(0,0,0,0.35)';
+      c.beginPath(); c.ellipse(pr.x, fy, 18, 4, 0, 0, Math.PI * 2); c.fill();
+      drawPrisoner(c, pr, pr.look, pr.x, fy, CELL_SCALE);
+    }
+    drawParticles(c);
+    drawCellBars(c, 0);
+    if (mode === 'multi') {
+      for (const pr of list) {
+        cellNameTag(c, pr.name + (pr.key === 'me' ? ' (you)' : ''), pr.look.color, pr.x, fy - PLAYER_H * CELL_SCALE - 22);
+      }
+    }
+  }
+
+  // ---------------- the escape cutscene ----------------
+  const ESC = { BREAK: 1.3, RUN_END: 4.3, END: 5.0 };   // timeline (seconds)
+  const escape = { t: 0, cast: [], done: null, skippable: false, stepT: 0 };
+
+  /** Play the escape with these prisoners, then call done(). */
+  function playEscape(cast, done, skippable) {
+    const n = cast.length;
+    escape.t = 0;
+    escape.stepT = 0;
+    escape.done = done;
+    escape.skippable = skippable;
+    escape.cast = cast.map((e, i) => {
+      const pr = cell.cast.get(e.key);
+      return { ...e, idx: i, n, startX: pr ? pr.x : W / 2 + (i - (n - 1) / 2) * 90, p: makeSprite() };
+    });
+    clearInput();
+    ui.toast.classList.remove('show');
+    setState('escape');
+    Sound.init();
+    Sound.siren(ESC.END);
+  }
+
+  function finishEscape() {
+    const done = escape.done;
+    escape.done = null;
+    if (done) done();
+  }
+
+  function skipEscape() {
+    if (state !== 'escape' || !escape.skippable) return;
+    Sound.stopSiren();
+    finishEscape();
+  }
+
+  function stepEscape(dt) {
+    if (escape.frozen) return; // test hook: __dttf.escapeAt()
+    const prev = escape.t;
+    escape.t += dt;
+    const t = escape.t;
+    const crossed = (mark) => prev < mark && t >= mark;
+    if (crossed(0.55)) Sound.crack();                       // the bars give way
+    if (t > ESC.BREAK && t < ESC.RUN_END + 0.3) {           // running footsteps
+      escape.stepT -= dt;
+      if (escape.stepT <= 0) { escape.stepT = 0.16; Sound.step(); }
+    }
+    if (crossed(ESC.RUN_END + 0.2)) Sound.record();         // made it out!
+    updateEffects(dt);
+    if (t >= ESC.END) finishEscape();
+  }
+
+  /** Big stencil caption across the middle of the screen. */
+  function caption(c, text, y, size, color, alpha) {
+    if (alpha <= 0) return;
+    c.save();
+    c.globalAlpha = alpha;
+    c.font = size + 'px Impact, Haettenschweiler, "Arial Black", sans-serif';
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.lineWidth = Math.max(2, size / 9);
+    c.lineJoin = 'round'; // no sharp spikes on letter tips
+    c.strokeStyle = 'rgba(0,0,0,0.85)';
+    c.strokeText(text, W / 2, y);
+    c.fillStyle = color;
+    c.fillText(text, W / 2, y);
+    c.restore();
+  }
+
+  function renderEscape(c) {
+    const t = escape.t;
+    if (t < ESC.BREAK) renderBreakout(c, t);
+    else renderCorridor(c, t - ESC.BREAK);
+    if (escape.skippable && t < ESC.END - 0.7) {
+      c.save();
+      c.font = 'bold 12px "Trebuchet MS", sans-serif';
+      c.textAlign = 'center';
+      c.fillStyle = 'rgba(241,241,238,0.55)';
+      c.fillText('SPACE / TAP TO SKIP', W / 2, H - 18);
+      c.restore();
+    }
+  }
+
+  /** Part 1: alarm in the cell, the gate slides open, everyone sprints at you. */
+  function renderBreakout(c, t) {
+    const fy = cellFloorY();
+    const amt = t < 0.6 ? 4 : 1.5;
+    const go = clamp((t - 0.7) / (ESC.BREAK - 0.7), 0, 1);
+    const ease = go * go;
+    const bars = t < 0.55 ? Math.sin(t * 60) * 3 : -Math.pow((t - 0.55) / 0.5, 2) * (W + 80);
+
+    c.save();
+    c.translate(rand(-amt, amt), rand(-amt, amt));
+    drawCellRoom(c, t);
+    if (go > 0.3) drawCellBars(c, bars); // once they're through the gate, they're in front of it
+    for (const r of escape.cast) {
+      const p = r.p;
+      p.face = 0;
+      p.vx = go > 0 ? 300 : 0;
+      p.runPhase = t * 18 + r.idx;
+      const spread = (r.idx - (r.n - 1) / 2) * Math.min(150, (W * 0.7) / r.n);
+      const sx = lerp(r.startX, W / 2 + spread * (1 + ease), ease);
+      drawPrisoner(c, p, r.look, sx, fy + ease * H * 0.16, CELL_SCALE * (1 + ease * 2.6));
+    }
+    if (go <= 0.3) drawCellBars(c, bars);
+    c.restore();
+
+    c.fillStyle = 'rgba(255,20,20,' + (0.1 + 0.1 * Math.sin(t * 16)).toFixed(3) + ')';
+    c.fillRect(0, 0, W, H);
+    caption(c, 'LOCKDOWN BREACH!', H * 0.17, Math.round(Math.min(W, 900) * 0.085 * (1 + 0.05 * Math.sin(t * 20))),
+      COLORS.red, Math.sin(t * 12) > -0.3 ? 1 : 0.45);
+    const white = clamp((t - (ESC.BREAK - 0.22)) / 0.22, 0, 1);
+    if (white > 0) {
+      c.fillStyle = 'rgba(255,255,255,' + white.toFixed(3) + ')';
+      c.fillRect(0, 0, W, H);
+    }
+  }
+
+  /** Part 2: pseudo-3D run down the cell-block corridor, straight at the camera.
+   *  World units: x across, y up, z into the screen; P() projects to the screen. */
+  function renderCorridor(c, u) {
+    const runEnd = ESC.RUN_END - ESC.BREAK;         // seconds of running
+    const camZ = -u * 7;                             // the camera flies backwards...
+    const camX = Math.sin(u * 2.1) * 0.18;
+    const camH = 1.45 + Math.abs(Math.sin(u * 11)) * 0.07; // ...with a running bob
+    const f = Math.min(W * 0.75, H);
+    const hx = W / 2 + Math.sin(u * 1.7) * 6, hy = H * 0.45;
+    const NEAR = 0.3, FAR = 64, CW = 2.4, CH = 3.3;
+    const zn = camZ + NEAR, zf = camZ + FAR;
+    const P = (x, y, z) => {
+      const dz = Math.max(0.05, z - camZ);
+      return [hx + ((x - camX) * f) / dz, hy + ((camH - y) * f) / dz, dz];
+    };
+    const quad = (a, b, d, e, fill) => {
+      c.beginPath();
+      c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.lineTo(d[0], d[1]); c.lineTo(e[0], e[1]);
+      c.closePath();
+      c.fillStyle = fill;
+      c.fill();
+    };
+
+    // corridor box: floor, ceiling, walls
+    c.fillStyle = '#060708';
+    c.fillRect(0, 0, W, H);
+    quad(P(-CW, 0, zn), P(CW, 0, zn), P(CW, 0, zf), P(-CW, 0, zf), '#2B2E34');
+    quad(P(-CW, CH, zn), P(CW, CH, zn), P(CW, CH, zf), P(-CW, CH, zf), '#17191D');
+    quad(P(-CW, 0, zn), P(-CW, CH, zn), P(-CW, CH, zf), P(-CW, 0, zf), '#32363D');
+    quad(P(CW, 0, zn), P(CW, CH, zn), P(CW, CH, zf), P(CW, 0, zf), '#2C3036');
+
+    // seams every 2 units rushing past - this is what sells the speed
+    c.lineWidth = 1.5;
+    for (let z = Math.ceil(zn / 2) * 2; z < zf; z += 2) {
+      const a = clamp(1 - (z - camZ) / FAR, 0, 1) * 0.55;
+      const l0 = P(-CW, 0, z), r0 = P(CW, 0, z), l1 = P(-CW, CH, z), r1 = P(CW, CH, z);
+      c.strokeStyle = 'rgba(0,0,0,' + a.toFixed(3) + ')';
+      c.beginPath();
+      c.moveTo(l1[0], l1[1]); c.lineTo(l0[0], l0[1]); c.lineTo(r0[0], r0[1]); c.lineTo(r1[0], r1[1]);
+      c.stroke();
+    }
+
+    // barred cell doors along both walls
+    for (let z = Math.floor(zn / 6) * 6; z < zf; z += 6) {
+      for (const side of [-1, 1]) {
+        const x = side * CW, z0 = z - 1 + (side > 0 ? 3 : 0), z1 = z0 + 2;
+        if (z0 < zn) continue;
+        quad(P(x, 0, z0), P(x, 2.4, z0), P(x, 2.4, z1), P(x, 0, z1), '#121417');
+        c.strokeStyle = '#5A616C';
+        c.lineWidth = Math.max(1, (0.05 * f) / (z0 - camZ));
+        c.beginPath();
+        for (let k = 0; k <= 6; k++) {
+          const zz = z0 + (k / 6) * 2;
+          const a = P(x, 0, zz), b = P(x, 2.4, zz);
+          c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]);
+        }
+        const m0 = P(x, 1.2, z0), m1 = P(x, 1.2, z1);
+        c.moveTo(m0[0], m0[1]); c.lineTo(m1[0], m1[1]);
+        c.stroke();
+      }
+    }
+
+    // ceiling lamps with pools of light on the floor
+    for (let z = Math.floor(zn / 6) * 6 + 3; z < zf; z += 6) {
+      if (z < zn) continue;
+      const dz = z - camZ, fade = clamp(1 - dz / FAR, 0, 1);
+      const pool = P(0, 0, z), rx = (1.7 * f) / dz, ry = (0.55 * f) / dz;
+      const g = c.createRadialGradient(pool[0], pool[1], 0, pool[0], pool[1], rx);
+      g.addColorStop(0, 'rgba(255,225,150,' + (0.35 * fade).toFixed(3) + ')');
+      g.addColorStop(1, 'rgba(255,225,150,0)');
+      c.save();
+      c.translate(pool[0], pool[1]);
+      c.scale(1, ry / rx);
+      c.fillStyle = g;
+      c.beginPath(); c.arc(0, 0, rx, 0, Math.PI * 2); c.fill();
+      c.restore();
+      const lamp = P(0, CH - 0.05, z);
+      c.fillStyle = 'rgba(255,236,190,' + (0.9 * fade).toFixed(3) + ')';
+      c.fillRect(lamp[0] - (0.5 * f) / dz, lamp[1] - 2, f / dz, Math.max(2, (0.08 * f) / dz));
+    }
+
+    // red alarm beacons on the walls
+    const blink = Math.sin(u * 14) > 0;
+    for (let z = Math.floor(zn / 12) * 12 + 6; z < zf; z += 12) {
+      if (z < zn) continue;
+      for (const side of [-1, 1]) {
+        const b = P(side * (CW - 0.02), 2.9, z), r = Math.max(1.5, (0.14 * f) / b[2]);
+        if (blink) {
+          const gg = c.createRadialGradient(b[0], b[1], 0, b[0], b[1], r * 6);
+          gg.addColorStop(0, 'rgba(255,40,40,0.35)');
+          gg.addColorStop(1, 'rgba(255,40,40,0)');
+          c.fillStyle = gg;
+          c.beginPath(); c.arc(b[0], b[1], r * 6, 0, Math.PI * 2); c.fill();
+        }
+        c.fillStyle = blink ? 'rgba(255,50,50,0.95)' : 'rgba(120,20,20,0.9)';
+        c.beginPath(); c.arc(b[0], b[1], r, 0, Math.PI * 2); c.fill();
+      }
+    }
+
+    // darkness swallowing the far end...
+    const fog = c.createRadialGradient(hx, hy, 0, hx, hy, H * 0.55);
+    fog.addColorStop(0, 'rgba(3,3,4,0.95)');
+    fog.addColorStop(0.35, 'rgba(3,3,4,0.55)');
+    fog.addColorStop(1, 'rgba(3,3,4,0)');
+    c.fillStyle = fog;
+    c.fillRect(0, 0, W, H);
+
+    // ...with the guards' flashlights sweeping out of it
+    for (let i = 0; i < 2; i++) {
+      const ox = hx + (i ? 18 : -18), oy = hy + 8, len = H * 0.95, sp = 0.2;
+      const ang = Math.PI / 2 + (i ? 0.6 : -0.6) + Math.sin(u * 2.2 + i * 1.7) * 0.45;
+      const g = c.createRadialGradient(ox, oy, 0, ox, oy, len);
+      g.addColorStop(0, 'rgba(255,240,180,0.3)');
+      g.addColorStop(1, 'rgba(255,240,180,0)');
+      c.fillStyle = g;
+      c.beginPath();
+      c.moveTo(ox, oy);
+      c.lineTo(ox + Math.cos(ang - sp) * len, oy + Math.sin(ang - sp) * len);
+      c.lineTo(ox + Math.cos(ang + sp) * len, oy + Math.sin(ang + sp) * len);
+      c.closePath();
+      c.fill();
+    }
+
+    // the prisoners, running straight at you (far ones first)
+    const burst = clamp((u - (runEnd - 0.5)) / 0.7, 0, 1); // final dash past the camera
+    const runners = escape.cast.map((r) => {
+      const spacing = Math.min(1.15, 3.6 / r.n);
+      const x = (r.idx - (r.n - 1) / 2) * spacing + Math.sin(u * 3 + r.idx) * 0.12;
+      const lag = (r.idx % 2) * 1.2 + (r.idx % 3) * 0.4;
+      const ahead = 6 + lag + Math.sin(u * 2 + r.idx) * 0.3 - u * 0.35;
+      return { r, x, z: camZ + lerp(ahead, -0.4, burst * burst) };
+    }).sort((a, b) => b.z - a.z);
+    for (const { r, x, z } of runners) {
+      const dz = z - camZ;
+      if (dz < 0.45) continue;
+      const foot = P(x, 0, z);
+      const scale = (1.75 * f) / dz / PLAYER_H;
+      c.fillStyle = 'rgba(0,0,0,0.4)';
+      c.beginPath(); c.ellipse(foot[0], foot[1], (0.45 * f) / dz, (0.12 * f) / dz, 0, 0, Math.PI * 2); c.fill();
+      const p = r.p;
+      p.face = 0;
+      p.vx = 300;
+      p.runPhase = u * 16 + r.idx * 1.7;
+      drawPrisoner(c, p, r.look, foot[0], foot[1], scale);
+      if (mode === 'multi' && r.name) {
+        cellNameTag(c, r.name + (r.key === 'me' ? ' (you)' : ''), r.look.color, foot[0], foot[1] - PLAYER_H * scale - 14);
+      }
+    }
+
+    c.fillStyle = 'rgba(255,20,20,' + (blink ? 0.08 : 0.03) + ')';
+    c.fillRect(0, 0, W, H);
+    caption(c, 'RUN!', H * 0.2, Math.round(Math.min(W, 900) * 0.16 * (1 + Math.max(0, 0.8 - u) * 0.3)),
+      COLORS.yellow, clamp((0.8 - u) / 0.3, 0, 1));
+
+    // fade in from the breakout's white flash
+    if (u < 0.25) {
+      c.fillStyle = 'rgba(255,255,255,' + (1 - u / 0.25).toFixed(3) + ')';
+      c.fillRect(0, 0, W, H);
+    }
+    // daylight floods in as they burst out
+    const day = clamp((u - (runEnd - 0.1)) / 0.45, 0, 1);
+    if (day > 0) {
+      c.fillStyle = 'rgba(255,248,225,' + day.toFixed(3) + ')';
+      c.fillRect(0, 0, W, H);
+      caption(c, 'ESCAPED!', H * 0.45, Math.round(Math.min(W, 900) * 0.15), COLORS.primary, clamp((u - runEnd) / 0.25, 0, 1));
+    }
   }
 
   /* ==================================================================
@@ -1142,6 +1643,8 @@
   function render() {
     const c = ctx;
     c.setTransform(viewScale, 0, 0, viewScale, 0, 0);
+    if (state === 'escape') { renderEscape(c); return; }
+    if (isCellState()) { renderCell(c); return; }
     drawBackground(c);
 
     c.save();
@@ -1537,8 +2040,10 @@
     // ---- ball & chain (trails behind; dangles while airborne) ----
     const footX = x + w / 2 - p.face * 5;
     const footY = y + h - 2;
-    const ballX = footX - p.face * 14 - clamp(p.vx / 45, -6, 6);
-    const ballY = grounded ? y + h - 5 : y + h + 4 - clamp(p.vy / 150, -6, 6);
+    const front = p.face === 0; // facing the camera (cell scene / escape cutscene)
+    const ballX = front ? x + w / 2 + 12 : footX - p.face * 14 - clamp(p.vx / 45, -6, 6);
+    const ballY = front ? y + h - 4 - Math.abs(Math.sin(p.runPhase)) * (Math.abs(p.vx) > 20 ? 5 : 0)
+      : grounded ? y + h - 5 : y + h + 4 - clamp(p.vy / 150, -6, 6);
     c.strokeStyle = '#B4BAC4';
     c.lineWidth = 1.2;
     for (let i = 1; i <= 4; i++) {
@@ -1623,7 +2128,8 @@
     c.fillStyle = look.stripe;
     c.fillRect(-8.5, top + 0.5, 17, 1.6);
     c.fillStyle = look.suit;
-    c.fillRect(p.face > 0 ? 2 : -11, top + 2.5, 9, 2); // peak
+    if (p.face === 0) c.fillRect(-5, top + 2.5, 10, 2); // peak
+    else c.fillRect(p.face > 0 ? 2 : -11, top + 2.5, 9, 2);
 
     // eyes look where you're going; wide eyes + open mouth when falling
     const ex = p.face * 2;
@@ -1771,6 +2277,16 @@
     setState('playing');
   }
 
+  /** PLAY from the menu: watch the escape, then the run starts. */
+  function beginSoloEscape() {
+    if (state !== 'menu') return;
+    playEscape([{ key: 'me', name: '', look: LOOKS[0] }], () => {
+      startGame(true);
+      flash = 0.9;
+      run.goFlash = 0.7;
+    }, true);
+  }
+
   function togglePause() {
     // A multiplayer match can't be paused for everyone; offer to leave instead.
     if (mode === 'multi') {
@@ -1860,7 +2376,7 @@
 
   function handleAction(action) {
     switch (action) {
-      case 'play':
+      case 'play': beginSoloEscape(); break;
       case 'again':
         if (state === 'gameover' && performance.now() - gameOverAt < 300) return;
         startGame();
@@ -2229,8 +2745,6 @@
     worldLock = clamp(Math.round(num(worldW, W_MIN)), W_MIN, W_MAX); // same width for everyone...
     resize();
     resetRun(seed);           // ...and same seed => identical tower for everyone
-    run.countdown = 3;
-    Sound.tick();
     myLook = lookFor(roster[meIndex].color);
 
     // spread everyone out across the starting platform
@@ -2248,7 +2762,15 @@
     accumulator = 0;
     mp.sendTimer = 0;
     mp.boardTimer = 1; // refresh the leaderboard right away
-    setState('playing');
+    // everyone in the match escapes together (not skippable, so nobody starts early)
+    const cast = roster.map((r) => ({ key: r.id === mp.myId ? 'me' : r.id, name: r.name, look: lookFor(r.color) }));
+    playEscape(cast, () => {
+      run.countdown = 3;
+      Sound.tick();
+      accumulator = 0;
+      flash = 0.9;
+      setState('playing');
+    }, false);
   }
 
   function makeRemote(r, x, y) {
@@ -2430,7 +2952,8 @@
 
   function step(dt) {
     if (state === 'playing') stepPlaying(dt);
-    else if (state === 'menu' || state === 'help' || state === 'mp' || state === 'lobby') stepMenu(dt);
+    else if (state === 'escape') stepEscape(dt);
+    else if (isCellState()) stepCell(dt);
     else if (state === 'gameover' || state === 'results') {
       run.clock += dt;
       updatePlatforms(dt, run.clock);
@@ -2495,6 +3018,7 @@
       if (btn.blur && !btn.classList.contains('primary')) btn.blur();
     });
     document.querySelectorAll('[data-hold]').forEach(bindTouchButton);
+    stageEl.addEventListener('pointerdown', () => { if (state === 'escape') skipEscape(); });
 
     // Losing focus / hiding the tab: pause and drop held keys, no physics jump on return.
     // (Multiplayer matches can't pause, so there we only drop held keys.)
@@ -2554,6 +3078,12 @@
     remotes,
     mp,
     input,
+    /** Freeze the escape cutscene at `t` seconds (for screenshots/tests); null resumes. */
+    escapeAt(t) {
+      escape.frozen = t !== null;
+      if (t !== null) escape.t = t;
+      render();
+    },
     /** Simulate `sec` seconds instantly (handy for automated tests). */
     advance(sec) {
       for (let t = 0; t < sec; t += STEP) {
