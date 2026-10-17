@@ -610,7 +610,8 @@
 
     // ---- geometry: vertical gap, width, horizontal offset ----
     let dy = Math.min(rand(66, 80 + d * 7), 130);
-    if (hazardKind === 'saw' || hazardKind === 'orb') dy = Math.max(dy, 94);
+    if (hazardKind === 'saw') dy = Math.max(dy, 94);
+    if (hazardKind === 'orb') dy = Math.max(dy, 110); // orbs bob up and down, so they need a taller gap
     let w = rand(Math.max(64, 114 - d * 6), Math.max(86, 152 - d * 8));
     if (type === 'moving') w = Math.max(w, 92);
     if (hazardKind === 'spikes') w = Math.max(w, 124);
@@ -663,7 +664,11 @@
           hazards.push({ kind: 'saw', x: hx, y: hy, baseX: hx, baseY: hy, r: 16, range: sweep, speed: 1.4 + 0.12 * d, phase, ang: 0 });
         } else hazardKind = null;
       } else if (clear >= 0) {
-        hazards.push({ kind: 'orb', x: hx, y: hy, baseX: hx, baseY: hy, r: 13, range: 24, speed: 2.2 + 0.1 * d, phase, ang: 0 });
+        // keep the bobbing inside the open space between the upper platform's
+        // underside and the head of a player standing on the lower one
+        const oy = (col.lastY + y) / 2 - 10;
+        const bob = clamp((col.lastY - PLAYER_H - (y + PLAT_H)) / 2 - 13 - 2, 6, 24);
+        hazards.push({ kind: 'orb', x: hx, y: oy, baseX: hx, baseY: oy, r: 13, range: bob, speed: 2.2 + 0.1 * d, phase, ang: 0 });
       } else hazardKind = null;
     }
 
