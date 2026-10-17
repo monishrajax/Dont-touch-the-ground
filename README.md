@@ -45,6 +45,13 @@ Rules and notes:
 
 How it works: players connect directly to each other with WebRTC data channels, using the [PeerJS](https://peerjs.com) library. PeerJS's free public server only introduces players to each other; the host's game code is part of their PeerJS id. Everyone connects to the host, and the host relays position updates (15 per second) to the others. Each player runs their own physics, so controls feel instant even with lag.
 
+## Screen sizes
+
+- **Laptops and monitors:** the game fills the whole screen. Wider screens get a wider prison (up to 1280 units across) split into 2–3 side-by-side towers, so there are several routes up. Every tower is always climbable.
+- **Phones (portrait):** a 480-wide world with a taller view, and touch controls underneath.
+- The world width is fixed when a run starts; resizing the window during a run just rescales the view.
+- **Multiplayer:** everyone plays the same world width, the widest one that fits every player's screen. A laptop player in a match with a phone player gets a narrower world with dark bars at the sides.
+
 ## Controls
 
 | Action | Keyboard | Touch |
