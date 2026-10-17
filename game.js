@@ -18,7 +18,8 @@
      12b. Multiplayer (lobby, match, ghosts, results - transport is in net.js)
      13. Main loop & boot
 
-   World coordinates: the game world is 480 units wide. "y" grows downward,
+   World coordinates: the game world is W units wide (480 on phones, up to
+   1280 on wide screens, so the game always fills the screen). "y" grows downward,
    so climbing means y gets SMALLER. camY is the world y at the top of the
    screen. The canvas is scaled to fit the window, but all game logic uses
    these fixed world units, so resizing never affects collisions.
@@ -620,10 +621,15 @@
 
     const range = type === 'moving' ? rand(36, 56) : 0;
     const margin = w / 2 + range + 6;
+    const lo = col.x0 + margin, hi = col.x1 - margin;
     let cx = col.lastCx + rand(-dxMax, dxMax);
     // add some variety: avoid stacking platforms perfectly on top of each other
     if (Math.abs(cx - col.lastCx) < 30) cx += (R() < 0.5 ? -1 : 1) * 40;
-    cx = clamp(cx, col.x0 + margin, col.x1 - margin);
+    // bounce off the column edges instead of sticking to them (never moves
+    // the platform further from the previous one, so it stays reachable)
+    if (cx < lo) cx = lo + (lo - cx);
+    if (cx > hi) cx = hi - (cx - hi);
+    cx = clamp(cx, lo, hi);
 
     const y = col.lastY - dy;
     const p = makePlatform(type, cx - w / 2, y, w);
@@ -1031,6 +1037,8 @@
   const demo = { seq: [0, 1, 2, 3, 2, 1], i: 0, phase: 'rest', t: 0 };
 
   function initMenuScene() {
+    worldLock = 0; // no run any more: the world follows the screen size again
+    resize();
     run = newRunData();
     particles = [];
     hazards = [];
@@ -1038,19 +1046,40 @@
     lavaY = camY + H - LAVA_MIN_VISIBLE;
     shake = 0;
     flash = 0;
+    const ox = (W - W_MIN) / 2; // the demo is laid out for 480 wide; centre it
     platforms = [
-      makePlatform('normal', 50, 560, 130),
-      makePlatform('bouncy', 290, 470, 110),
-      makePlatform('moving', 150, 360, 110),
-      makePlatform('crumble', 300, 250, 110),
-      makePlatform('vanish', 30, 200, 100),
+      makePlatform('normal', ox + 50, 560, 130),
+      makePlatform('bouncy', ox + 290, 470, 110),
+      makePlatform('moving', ox + 150, 360, 110),
+      makePlatform('crumble', ox + 300, 250, 110),
+      makePlatform('vanish', ox + 30, 200, 100),
     ];
     const mv = platforms[2];
-    mv.baseX = 150; mv.range = 40; mv.speed = 1.2;
-    hazards.push({ kind: 'saw', x: 90, y: 120, baseX: 90, baseY: 120, r: 16, range: 50, speed: 1.4, phase: 0, ang: 0 });
+    mv.baseX = ox + 150; mv.range = 40; mv.speed = 1.2;
+    hazards.push({ kind: 'saw', x: ox + 90, y: 120, baseX: ox + 90, baseY: 120, r: 16, range: 50, speed: 1.4, phase: 0, ang: 0 });
+    // wide screens: a few extra (decorative) platforms on the sides
+    if (ox >= 200) {
+      platforms.push(
+        makePlatform('normal', ox - 190, 520, 120), makePlatform('moving', ox - 230, 380, 110),
+        makePlatform('normal', ox - 150, 240, 100), makePlatform('normal', ox + 520, 500, 120),
+        makePlatform('bouncy', ox + 580, 360, 100), makePlatform('normal', ox + 500, 210, 110),
+      );
+      const side = platforms[6];
+      side.baseX = side.x; side.range = 40; side.speed = 0.9;
+      hazards.push({ kind: 'orb', x: ox + 640, y: 120, baseX: ox + 640, baseY: 120, r: 13, range: 20, speed: 2, phase: 0, ang: 0 });
+    }
     player = makePlayer(0, 0);
     demo.i = 0; demo.phase = 'rest'; demo.t = 0;
     placeDemoHero(platforms[0]);
+  }
+
+  /** Slide the whole menu scene sideways (used when the window is resized). */
+  function shiftScene(dx) {
+    if (!player) return;
+    for (const p of platforms) { p.x += dx; p.baseX += dx; }
+    for (const h of hazards) { h.x += dx; h.baseX += dx; }
+    for (const q of particles) q.x += dx;
+    player.x += dx;
   }
 
   function placeDemoHero(pl) {
@@ -1099,9 +1128,9 @@
      11. RENDERING
      ================================================================== */
   function initStars() {
-    for (let i = 0; i < 80; i++) {
-      // y is stored as 0..1 so stars fill the view whatever its height
-      stars.push({ x: rand(0, W), y: Math.random(), z: rand(0.1, 1), tw: rand(0, 6.28), s: rand(0.6, 1.8) });
+    for (let i = 0; i < 160; i++) {
+      // x and y are stored as 0..1 so the dust fills the view whatever its size
+      stars.push({ x: Math.random(), y: Math.random(), z: rand(0.1, 1), tw: rand(0, 6.28), s: rand(0.6, 1.8) });
     }
   }
 
@@ -1262,21 +1291,24 @@
     const WIN_GAP = 520;
     for (let k = Math.floor((par - 120) / WIN_GAP); k * WIN_GAP - par < H; k++) {
       const wy = k * WIN_GAP + 150 - par;
-      const wx = (k & 1) ? 312 : 70;
-      c.fillStyle = '#0B0C0F';
-      c.fillRect(wx - 6, wy - 6, 112, 82);
-      const moon = c.createLinearGradient(0, wy, 0, wy + 70);
-      moon.addColorStop(0, '#2A3A55');
-      moon.addColorStop(1, '#17202F');
-      c.fillStyle = moon;
-      c.fillRect(wx, wy, 100, 70);
-      c.fillStyle = 'rgba(220,230,255,0.55)';
-      c.beginPath();
-      c.arc(wx + 72, wy + 20, 7, 0, Math.PI * 2);
-      c.fill();
-      c.fillStyle = '#3B4048';
-      for (let b = 1; b < 6; b++) c.fillRect(wx + b * 16.6 - 2, wy, 4, 70);
-      c.fillRect(wx, wy + 32, 100, 4);
+      for (let col = 0; col * 360 < W; col++) { // one window per 360 px of width
+        const wx = col * 360 + (((k + col) & 1) ? 242 : 40);
+        if (wx + 106 > W) continue;
+        c.fillStyle = '#0B0C0F';
+        c.fillRect(wx - 6, wy - 6, 112, 82);
+        const moon = c.createLinearGradient(0, wy, 0, wy + 70);
+        moon.addColorStop(0, '#2A3A55');
+        moon.addColorStop(1, '#17202F');
+        c.fillStyle = moon;
+        c.fillRect(wx, wy, 100, 70);
+        c.fillStyle = 'rgba(220,230,255,0.55)';
+        c.beginPath();
+        c.arc(wx + 72, wy + 20, 7, 0, Math.PI * 2);
+        c.fill();
+        c.fillStyle = '#3B4048';
+        for (let b = 1; b < 6; b++) c.fillRect(wx + b * 16.6 - 2, wy, 4, 70);
+        c.fillRect(wx, wy + 32, 100, 4);
+      }
     }
 
     // two searchlights sweeping across the wall
@@ -1317,7 +1349,7 @@
     for (const s of stars) {
       const y = (((s.y * H - camY * s.z * 0.25 + visualTime * 6 * s.z) % H) + H) % H;
       c.globalAlpha = (0.05 + 0.15 * s.z) * (0.6 + 0.4 * Math.sin(visualTime + s.tw));
-      c.fillRect(s.x, y, s.s, s.s);
+      c.fillRect(s.x * W, y, s.s, s.s);
     }
     c.globalAlpha = 1;
   }
@@ -1725,6 +1757,8 @@
     Sound.init();
     myLook = LOOKS[0];
     remotes.clear();
+    worldLock = preferredWidth(); // the world fills this screen, and keeps that width for the whole run
+    resize();
     resetRun();
     clearInput();
     ui.toast.classList.remove('show');
@@ -1977,7 +2011,7 @@
       await Net.join(code);
       if (state !== 'mp') { Net.leave(); return; }
       setMode('multi');
-      Net.send({ t: 'hello', name, v: 1 });
+      Net.send({ t: 'hello', name, v: 1, w: preferredWidth() }); // w: how wide a world fits my screen
       mpStatus('Connected! Waiting for the host…');
     } catch (err) {
       Net.leave();
@@ -2056,7 +2090,7 @@
         let color = 0;
         while (used.has(color)) color++;
         const name = cleanName(msg.name);
-        mp.players.push({ id: from, name, color });
+        mp.players.push({ id: from, name, color, w: clamp(Math.round(num(msg.w, W_MIN)), W_MIN, W_MAX) });
         Net.sendTo(from, { t: 'welcome', id: from });
         hostBroadcastLobby();
         showToast(name + ' joined');
@@ -2096,8 +2130,11 @@
     mp.alive = new Set(mp.roster.map((p) => p.id));
     mp.finals = new Map();
     mp.inMatch = true;
-    Net.broadcast({ t: 'start', seed, roster: mp.roster });
-    beginMatch(seed, mp.roster);
+    // Everyone plays the same world width: the widest one that fits every player's screen.
+    mp.players[0].w = preferredWidth();
+    const worldW = Math.min(...mp.players.map((p) => p.w || W_MIN));
+    Net.broadcast({ t: 'start', seed, roster: mp.roster, w: worldW });
+    beginMatch(seed, mp.roster, worldW);
   }
 
   /** Host: a player fell (or disconnected). Ends the round when nobody is left. */
@@ -2152,7 +2189,7 @@
         break;
       case 'start':
         if (!mp.myId) return;
-        beginMatch(Math.floor(num(msg.seed)) >>> 0, cleanRoster(msg.roster));
+        beginMatch(Math.floor(num(msg.seed)) >>> 0, cleanRoster(msg.roster), msg.w);
         break;
       case 'st': {
         const id = String(msg.id);
@@ -2175,7 +2212,7 @@
   }
 
   // ---------------- the match itself (host and clients) ----------------
-  function beginMatch(seed, roster) {
+  function beginMatch(seed, roster, worldW) {
     mp.roster = roster;
     mp.inMatch = true;
     const meIndex = roster.findIndex((r) => r.id === mp.myId);
@@ -2184,7 +2221,9 @@
       return;
     }
     Sound.init();
-    resetRun(seed);           // same seed => identical tower for everyone
+    worldLock = clamp(Math.round(num(worldW, W_MIN)), W_MIN, W_MAX); // same width for everyone...
+    resize();
+    resetRun(seed);           // ...and same seed => identical tower for everyone
     run.countdown = 3;
     Sound.tick();
     myLook = lookFor(roster[meIndex].color);

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "game",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["/private/tmp/claude-501/-Users-monishraja-Documents-GitHub-Dont-touch-the-ground/994781e4-2c2b-46d3-a9d7-e70fed9cc479/scratchpad/serve.js", "/Users/monishraja/Documents/GitHub/Dont touch the ground", "8765"],
+      "port": 8765
+    }
+  ]
+}
