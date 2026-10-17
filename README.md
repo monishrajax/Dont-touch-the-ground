@@ -48,7 +48,7 @@ How it works: players connect directly to each other with WebRTC data channels, 
 ## The jail cell and the escape
 
 - **Lobby:** the main menu and the multiplayer lobby take place inside a jail cell: bricks, a barred window, a bunk bed, a steel toilet, tally marks and a swinging bulb, all behind the cell bars. Your prisoner paces around inside. In multiplayer, everyone in the lobby is in the same cell, each in their own jumpsuit colour and with a name tag.
-- **Escape scene:** pressing **PLAY** (or **Enter**) plays a 5-second escape before the run starts:
+- **Escape scene:** pressing **ESCAPE** (or **Enter**) plays a 5-second escape before the run starts:
   1. **Lockdown breach:** sirens, spinning red alarm lights, and the gate slides open.
   2. **Corridor run:** a pseudo-3D chase down the cell block, with the prisoners sprinting straight at the camera past barred cells, ceiling lamps and the guards' flashlights.
   3. **ESCAPED!** They burst out into daylight, and the game fades in.
@@ -72,7 +72,7 @@ How it works: players connect directly to each other with WebRTC data channels, 
 | Pause / resume | `P` or `Esc` | ❚❚ (top right) |
 | Restart | `R` | Pause → Restart |
 | Mute | `M` | ♪ (top right) |
-| Start / play again | `Enter` or `Space` | PLAY button |
+| Start / play again | `Enter` or `Space` | ESCAPE button |
 
 The left and right screen edges wrap around: walk off one side and you come back on the other.
 
