@@ -29,7 +29,10 @@
   /* ==================================================================
      1. CONSTANTS & TUNING
      ================================================================== */
-  const W = 480;                 // world/view width
+  const W_MIN = 480;             // narrowest world (phones in portrait)
+  const W_MAX = 1280;            // widest world (wide monitors)
+  let W = W_MIN;                 // current world/view width (set by resize())
+  let worldLock = 0;             // while a run exists its width is locked (0 = follow the screen)
   const H_MIN = 720;             // normal view height (2:3)
   const H_MAX = 960;             // tall phones get to see up to this much
   let H = H_MIN;                 // current view height (set by resize())
@@ -281,14 +284,32 @@
     };
   }
 
-  /** Fit the game into the window. The world is always 480 units wide; the
-   *  view is 720 tall, or taller (up to 960) on tall screens like phones so
-   *  there are no empty bars. devicePixelRatio keeps graphics sharp. */
-  function resize() {
+  /** Usable screen size in CSS pixels (minus any phone notch). */
+  function screenSize() {
     const safe = safeArea();
-    const vw = window.innerWidth - safe.left - safe.right;
-    const vh = window.innerHeight - safe.top - safe.bottom;
+    return {
+      vw: window.innerWidth - safe.left - safe.right,
+      vh: window.innerHeight - safe.top - safe.bottom,
+    };
+  }
+
+  /** World width that would fill this screen at the normal 720 view height:
+   *  480 on portrait phones, up to 1280 on wide monitors. */
+  function preferredWidth() {
+    const { vw, vh } = screenSize();
+    return clamp(Math.round((H_MIN * vw) / vh), W_MIN, W_MAX);
+  }
+
+  /** Fit the game to the window so it fills the screen. Wide screens get a
+   *  wider world, tall phones a taller view (up to 960). While a run is in
+   *  progress the world width is locked (worldLock) and the view just
+   *  rescales. devicePixelRatio keeps graphics sharp. */
+  function resize() {
+    const { vw, vh } = screenSize();
     const isTouch = document.body.classList.contains('is-touch');
+    const oldW = W;
+    W = worldLock || preferredWidth();
+    if (W !== oldW && !worldLock) shiftScene((W - oldW) / 2); // keep the menu scene centred
     const s = Math.min(vw / W, vh / H_MIN);
     const fontPx = Math.max(10, 17 * s);
 
@@ -512,37 +533,61 @@
     player.ground = start;
 
     const s = seed === undefined ? Math.floor(Math.random() * 4294967296) : seed;
-    gen = { lastCx: W / 2, lastY: START_Y, lastType: 'normal', count: 0, unsafeRun: 0, sinceHazard: 0, rng: seededRandom(s) };
+    gen = { rng: seededRandom(s), cols: makeColumns() };
     generatePlatforms();
     updateHud(true);
   }
 
   /* ==================================================================
      7. PROCEDURAL GENERATION
-     Platforms are generated one at a time upward from the last one.
-     Every new platform is placed within a jump-reachable distance of the
-     previous one, so there is always a valid route.
+     The world is split into side-by-side columns (just one on narrow
+     screens, 2-3 on wide ones). Each column is its own tower: platforms are
+     generated one at a time upward, each within a jump-reachable distance
+     of the one before, so every column always has a valid route up.
      ================================================================== */
-  function generatePlatforms() {
-    while (gen.lastY > camY - 520) addPlatform();
+  function makeColumns() {
+    const k = Math.max(1, Math.floor(W / 380));
+    const cols = [];
+    for (let i = 0; i < k; i++) {
+      const x0 = (W * i) / k;
+      const x1 = (W * (i + 1)) / k;
+      cols.push({
+        x0, x1,
+        lastCx: clamp(W / 2, x0 + 90, x1 - 90), // start each tower as close to the start platform as it can
+        lastY: START_Y, lastType: 'normal', count: 0, unsafeRun: 0, sinceHazard: 0,
+      });
+    }
+    return cols;
   }
 
-  function addPlatform() {
+  /** Keep generating until every column reaches 520 px above the screen.
+   *  Always extending the lowest column first keeps the order (and therefore
+   *  the seeded tower) identical on every player's machine. */
+  function generatePlatforms() {
+    for (;;) {
+      let col = null;
+      for (const c of gen.cols) if (!col || c.lastY > col.lastY) col = c;
+      if (col.lastY <= camY - 520) break;
+      addPlatform(col);
+    }
+  }
+
+  function addPlatform(col) {
     // All randomness here comes from the seeded generator, so a given seed
-    // always builds exactly the same tower (needed for multiplayer).
+    // (and world width) always builds exactly the same tower.
     const R = gen.rng;
     const rand = (a, b) => a + R() * (b - a);
-    const heightM = (START_Y - gen.lastY) / 10;
+    const heightM = (START_Y - col.lastY) / 10;
     // Use a slightly lower height so new mechanics appear roughly when the
     // player (who is a few platforms below the generator) reaches that stage.
     const stage = stageForHeight(heightM - 45);
     const d = Math.min(stage, 9);
-    const learning = gen.count < 4;
+    const learning = col.count < 4;
 
     // ---- choose platform type ----
     let type = 'normal';
     if (!learning) {
-      const unstableAllowed = gen.unsafeRun === 0; // never two unstable platforms in a row
+      const unstableAllowed = col.unsafeRun === 0; // never two unstable platforms in a row
       type = weightedPick({
         normal: Math.max(45, 100 - d * 7),
         moving: stage >= 2 ? 16 + d * 3 : 0,
@@ -554,8 +599,8 @@
 
     // ---- decide whether this gap gets a hazard ----
     let hazardKind = null;
-    if (stage >= 3 && gen.sinceHazard >= 2 && !learning) {
-      const movingInvolved = type === 'moving' || gen.lastType === 'moving';
+    if (stage >= 3 && col.sinceHazard >= 2 && !learning) {
+      const movingInvolved = type === 'moving' || col.lastType === 'moving';
       if (R() < Math.min(0.55, 0.25 + 0.05 * (stage - 3)) && (!movingInvolved || stage >= 6)) {
         if (type === 'normal' && R() < 0.4) hazardKind = 'spikes';
         else hazardKind = stage >= 5 && R() < 0.4 ? 'orb' : 'saw';
@@ -571,16 +616,16 @@
 
     // How far sideways a jump of this height can reliably travel (conservative).
     let dxMax = 150 - (dy - 66) * 0.55;
-    if (type === 'moving' || gen.lastType === 'moving') dxMax -= 40;
+    if (type === 'moving' || col.lastType === 'moving') dxMax -= 40;
 
     const range = type === 'moving' ? rand(36, 56) : 0;
     const margin = w / 2 + range + 6;
-    let cx = gen.lastCx + rand(-dxMax, dxMax);
+    let cx = col.lastCx + rand(-dxMax, dxMax);
     // add some variety: avoid stacking platforms perfectly on top of each other
-    if (Math.abs(cx - gen.lastCx) < 30) cx += (R() < 0.5 ? -1 : 1) * 40;
-    cx = clamp(cx, margin, W - margin);
+    if (Math.abs(cx - col.lastCx) < 30) cx += (R() < 0.5 ? -1 : 1) * 40;
+    cx = clamp(cx, col.x0 + margin, col.x1 - margin);
 
-    const y = gen.lastY - dy;
+    const y = col.lastY - dy;
     const p = makePlatform(type, cx - w / 2, y, w);
     if (type === 'moving') {
       p.range = range;
@@ -594,23 +639,35 @@
     if (hazardKind === 'spikes') {
       p.spikes = { side: R() < 0.5 ? 0 : 1, w: 34 };
     } else if (hazardKind) {
-      // Place moving hazards in the middle of the gap, on the side of the
-      // screen AWAY from the direct route between the two platforms.
-      const midX = (gen.lastCx + cx) / 2;
-      const hx = clamp(midX < W / 2 ? midX + 190 : midX - 190, 70, W - 70);
-      const hy = (gen.lastY + y) / 2 - 14;
-      hazards.push(hazardKind === 'saw'
-        ? { kind: 'saw', x: hx, y: hy, baseX: hx, baseY: hy, r: 16, range: rand(55, 75), speed: 1.4 + 0.12 * d, phase: rand(0, 6.28), ang: 0 }
-        : { kind: 'orb', x: hx, y: hy, baseX: hx, baseY: hy, r: 13, range: 24, speed: 2.2 + 0.1 * d, phase: rand(0, 6.28), ang: 0 });
+      // Moving hazards sit in the middle of the gap, on the side of the
+      // column AWAY from the direct route between the two platforms, and
+      // never sweep closer than 60 px to that route or into a neighbouring column.
+      const midX = (col.lastCx + cx) / 2;
+      const zoneMid = (col.x0 + col.x1) / 2;
+      const hx = clamp(midX < zoneMid ? midX + 190 : midX - 190, col.x0 + 60, col.x1 - 60);
+      const hy = (col.lastY + y) / 2 - 14;
+      const clear = Math.abs(hx - midX) - 60;
+      const roll = rand(55, 75);
+      const phase = rand(0, 6.28);
+      if (hazardKind === 'saw') {
+        let sweep = Math.min(roll, clear);
+        if (col.x0 > 0) sweep = Math.min(sweep, hx - col.x0 - 22);
+        if (col.x1 < W) sweep = Math.min(sweep, col.x1 - hx - 22);
+        if (sweep >= 15) {
+          hazards.push({ kind: 'saw', x: hx, y: hy, baseX: hx, baseY: hy, r: 16, range: sweep, speed: 1.4 + 0.12 * d, phase, ang: 0 });
+        } else hazardKind = null;
+      } else if (clear >= 0) {
+        hazards.push({ kind: 'orb', x: hx, y: hy, baseX: hx, baseY: hy, r: 13, range: 24, speed: 2.2 + 0.1 * d, phase, ang: 0 });
+      } else hazardKind = null;
     }
 
     platforms.push(p);
-    gen.sinceHazard = hazardKind ? 0 : gen.sinceHazard + 1;
-    gen.unsafeRun = (type === 'vanish' || type === 'crumble') ? gen.unsafeRun + 1 : 0;
-    gen.lastCx = cx;
-    gen.lastY = y;
-    gen.lastType = type;
-    gen.count++;
+    col.sinceHazard = hazardKind ? 0 : col.sinceHazard + 1;
+    col.unsafeRun = (type === 'vanish' || type === 'crumble') ? col.unsafeRun + 1 : 0;
+    col.lastCx = cx;
+    col.lastY = y;
+    col.lastType = type;
+    col.count++;
   }
 
   /** Remove platforms/hazards far below the camera (they can never matter again). */
